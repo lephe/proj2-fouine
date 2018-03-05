@@ -1,0 +1,9 @@
+# Build and binary directory
+_build
+bin
+
+# Sublime Text files
+*.sublime-*
+
+# Individual notes about the project
+notes

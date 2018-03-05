@@ -1,0 +1,3 @@
+# Projet 2 : Fouine (Sébastien Michelland et Sébastien Baumert)
+
+À détailler...
