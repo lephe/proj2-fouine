@@ -2,28 +2,34 @@
 **	Util - Utility functions, independent from the core interpreter
 *)
 
+open Types
+
 (*
 	Range objects
 	These objects are used to keep track of the file location of the tokens
 	and expressions for better error diagnoses.
 *)
 
-(* range - pairs of Lexing.position to delimitate objects *)
-type range = Lexing.position * Lexing.position
-
-(* range_str - Get a textual representation on the form "line:column"
-   @arg [range]
-   @ret [string] *)
+(* range_str [range -> str]
+   Provides a textual representation of the starting point of the range, on the
+   form "file:line:column" *)
 let range_str ((s, e): range) : string =
 	let cnum = s.pos_cnum - s.pos_bol + 1 in
 	Printf.sprintf "%s:%02d:%02d" s.pos_fname s.pos_lnum cnum
 
-(* range_highlight - Print a line and highlight a range
-   This function assumes the "str" correspond to the source line referenced in
-   the range object, and highlights the corresponding columns. Bound checking
-   is performed to gracefully handle errors.
-   @arg [string]
-   @arg [range] *)
+(* range_merge [range -> range -> range]
+   Returns a new range object delimitating the shortest substring that contains
+   both (s1, e1) and (s2, e2).
+   This function assumes that (s1, e2) and (s2, e2) do not intersect. This is a
+   strong condition, but for the parser it's an evidence *)
+let range_merge ((s1, e1): range) ((s2, e2): range) : range =
+	if s1.pos_cnum < s2.pos_cnum
+	then (s1, e2)
+	else (s2, e1)
+
+(* range_highlight [string -> range -> unit]
+   Highlights a range within a line. This function is outdated... *)
+(* TODO: range_higlight: Handle multi-line ranges for file inputs *)
 let range_highlight str (_, col, len) =
 	(* Adjust the value of column and length *)
 	let n = String.length str in
@@ -36,8 +42,3 @@ let range_highlight str (_, col, len) =
 	print_string (String.sub str c l);
 	print_string "\x1b[0m";
 	print_string (String.sub str (c + l) (n - c - l))
-
-(* range_merge - Merge two ranges into one range object that covers the two
-   sections *)
-let range_merge ((s1, e1): range) ((s2, e2): range) : range =
-	(s1, e2)

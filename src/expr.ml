@@ -2,84 +2,179 @@
 **	Expr - Expression representation and evaluation
 *)
 
-(* expr - The tree-like type of expressions *)
-type expr =
-	(* Literal values and variables *)
-	| Expr_LitInt of int
-	| Expr_Name of string
-	(* Language constructs *)
-	| Expr_Let of string * expr * expr
-	(* Unary operators *)
-	| Expr_Minus of expr
-	(* Binary operators *)
-	| Expr_Sum of expr * expr
-	| Expr_Diff of expr * expr
-	| Expr_Prod of expr * expr
-
-(* aexpr - Annotated expressions
-
-   This type is a variant of the previous type, with "annotations": some
-   additional data attached to every node. This is helpful to compute types,
-   file ranges, propagate errors... the Abstract Syntax Tree uses such a type
-   and annotates the nodes with their location in the file.
-
-   It took me some time to come up with this variant. The requirements were:
-   - To be able to pattern match like expr just by changing the "match *" part
-   - To not have the annotation inside the patterns =
-   - To be able to convert with minimal additional syntax *)
-
-type 'a annot_expr =
-	(* Literal values *)
-	| Aexpr_LitInt of int
-	| Aexpr_Name of string
-	(* Language constructs *)
-	| Aexpr_Let of string * 'a aexpr * 'a aexpr
-	(* Unary operators *)
-	| Aexpr_Minus of 'a aexpr
-	(* Binary operators *)
-	| Aexpr_Sum of 'a aexpr * 'a aexpr
-	| Aexpr_Diff of 'a aexpr * 'a aexpr
-	| Aexpr_Prod of 'a aexpr * 'a aexpr
-
-and 'a aexpr = 'a * 'a annot_expr
-
-(*
-	Conversion functions
-	The goal here is to provide efficient primitives to avoid overhead when
-	manipulating the annotated expressions. The syntax required to turn one
-	kind of tree into another should be kept minimal!
-*)
-
-(* aexpr_clear - Remove the annotations from a annotated tree *)
-let rec aexpr_clear (exp: 'a aexpr) : expr = match snd exp with
-	| Aexpr_LitInt(i) -> Expr_LitInt(i)
-	| Aexpr_Name(n) -> Expr_Name(n)
-	| Aexpr_Let(s, e, f) -> Expr_Let(s, aexpr_clear e, aexpr_clear f)
-	| Aexpr_Minus(e) -> Expr_Minus(aexpr_clear e)
-	| Aexpr_Sum(e, f) -> Expr_Sum(aexpr_clear e, aexpr_clear f)
-	| Aexpr_Diff(e, f) -> Expr_Diff(aexpr_clear e, aexpr_clear f)
-	| Aexpr_Prod(e, f) -> Expr_Prod(aexpr_clear e, aexpr_clear f)
+open Types
+open Util
+open Pattern
 
 (*
 	Utility functions and expression manipulation
+	TODO: Enhance the way expression-printing functions are written
 *)
 
-(* aexpr_print - Print an expression type with annotations
-   [('a -> unit) -> int -> 'a aexpr -> unit] *)
-let rec aexpr_print annot_str indent exp =
+(* expr_free [expr -> StringSet.t]
+   Returns the set of all free variables of the given expression *)
+let rec expr_free exp = match exp.tree with
+	(* Bases cases *)
+	| LiteralInt _ | LiteralBool _ | LiteralUnit -> StringSet.empty
+	| Name n -> StringSet.of_list [ n ]
+	(* Compound expressions *)
+	| If (e, t, f) ->
+		StringSet.union (expr_free e)
+		(StringSet.union (expr_free t) (expr_free f))
+	| Let (_, pat, e, f) ->
+		let un = StringSet.union (expr_free e) (expr_free f)
+		in StringSet.diff un (pattern_free pat)
+	| Function (pat, e) ->
+		StringSet.diff (expr_free e) (pattern_free pat)
+	| Call (f, a) ->
+		StringSet.union (expr_free f) (expr_free a)
+	(* Boring operators *)
+	| UPlus e
+	| UMinus e
+		-> expr_free e
+	| Plus			(e, f)
+	| Minus			(e, f)
+	| Times			(e, f)
+	| Equal			(e, f)
+	| NotEqual		(e, f)
+	| Greater		(e, f)
+	| GreaterEqual	(e, f)
+	| Lower			(e, f)
+	| LowerEqual	(e, f)
+		-> StringSet.union (expr_free e) (expr_free f)
 
-	let recurse (name: string) (children: 'a aexpr list) : unit =
-		print_string (name ^ "\n");
-		List.iter (aexpr_print annot_str (indent + 1)) children in
+(* expr_print [int -> expr -> unit]
+   Display the syntax tree of an expression on stdout, indenting each line with
+   the provided level of indent. This function expects to be called at the
+   beginning of a line, and prints a final newline *)
+let rec expr_print indent exp =
 
 	(* Print 2 * 'indent' spaces, the smart way *)
-	Printf.printf "(%s) %*s" (Util.range_str (fst exp)) (2 * indent) "";
+	let space () =
+		Printf.printf "(%s) %*s" (range_str exp.range) (2 * indent) "" in
+	space ();
 
-	match (snd exp) with
-	| Aexpr_LitInt i -> print_int i; print_string "\n"
-	| Aexpr_Name n -> print_string ("{" ^ n ^ "}\n")
-	| Aexpr_Let (name, e, f) -> recurse ("let [" ^ name ^ "] in") [e; f]
-	| Aexpr_Minus e -> recurse "-" [e]
-	| Aexpr_Sum  (e, f) -> recurse "+" [e; f]
-	| Aexpr_Diff (e, f) -> recurse "-" [e; f]
-	| Aexpr_Prod (e, f) -> recurse "*" [e; f]
+	let recurse (str: string) (children: expr list) : unit =
+		print_string (str ^ "\n");
+		List.iter (expr_print (indent + 1)) children in
+
+	match exp.tree with
+
+	| LiteralInt i  -> Printf.printf "%d\n" i
+	| LiteralBool b -> print_string (if b then "true\n" else "false\n")
+	| LiteralUnit   -> print_string "()\n"
+	| Name n		-> Printf.printf "{%s}\n" n
+
+	| Let (recursive, pat, e, f) ->
+		let key = if recursive then "let rec " else "let " in
+		recurse (key ^ pattern_str pat ^ " = ") [e; f]
+
+	| If (e, t, f) ->
+		if f.tree = LiteralUnit then recurse "if-then" [e; t]
+		else recurse "if-then-else" [e; t; f]
+
+	| Function (pat, e) ->
+		recurse ("fun " ^ pattern_str pat ^ " ->") [e]
+	| Call (f, v) -> recurse "call" [f; v]
+
+	| UPlus  e -> recurse "+/1" [e]
+	| UMinus e -> recurse "-/1" [e]
+
+	| Plus			(e, f) -> recurse "+" [e; f]
+	| Minus			(e, f) -> recurse "-" [e; f]
+	| Times			(e, f) -> recurse "*" [e; f]
+
+	| Equal			(e, f) -> recurse "="  [e; f]
+	| NotEqual		(e, f) -> recurse "<>" [e; f]
+	| Greater		(e, f) -> recurse ">"  [e; f]
+	| GreaterEqual	(e, f) -> recurse ">=" [e; f]
+	| Lower			(e, f) -> recurse "<"  [e; f]
+	| LowerEqual	(e, f) -> recurse "<=" [e; f]
+
+
+(* expr_source2 [int -> expr -> unit] [private function]
+   Produce a human-readable listing of an expression
+   TODO: Avoid some parentheses by performing priority analysis *)
+let rec expr_source2 level exp =
+
+	let space level =
+		(* Print 2 * 'level' spaces, the smart way *)
+		Printf.printf "%*s" (2 * level) "" in
+
+	let binary op e f =
+		print_string "(";
+		expr_source2 level e;
+		print_string (") " ^ op ^ " (");
+		expr_source2 level f;
+		print_string ")" in
+
+	match exp.tree with
+
+	(* Simple cases *)
+	| LiteralInt  i	-> print_int i
+	| LiteralBool b	-> print_string (if b then "true" else "false")
+	| LiteralUnit	-> print_string "()"
+	| Name n		-> print_string n
+
+	(* Composed expressions. For lets, only increase indent when there are
+	   parameters (ie. function definition vs variable binding) *)
+	| Let (recursive, pat, e, f) ->
+		let key = if recursive then "let rec " else "let " in
+		print_string (key ^ pattern_str pat ^ " = ");
+		expr_source2 level e;
+		print_string " in\n";
+		(* TODO: Figure this out *)
+		(* let newlevel = if snd binding != [] then level + 1 else level in *)
+		let newlevel = level in
+		space newlevel;
+		expr_source2 newlevel f
+
+	| If (e, t, f) ->
+		print_string "if ";
+		expr_source2 level e;
+		print_string " then\n";
+		space (level + 1);
+		expr_source2 (level + 1) t;
+		print_string "\n";
+		space level;
+		print_string "else\n";
+		space (level + 1);
+		expr_source2 (level + 1) f
+
+	(* Functional expressions *)
+	| Function (pat, e) ->
+		print_string ("fun " ^ pattern_str pat ^ " ->\n");
+		space (level + 1);
+		expr_source2 (level + 1) e
+	| Call (f, arg) ->
+		expr_source2 level f;
+		print_string " (";
+		expr_source2 level arg;
+		print_string ")"
+
+	(* Unary arithmetic operators *)
+	| UPlus e ->
+		print_string "+";
+		expr_source2 level e
+	| UMinus e ->
+		print_string "-";
+		expr_source2 level e
+
+	(* Binary arithmetic operators *)
+	| Plus (e, f)  -> binary "+" e f
+	| Minus (e, f) -> binary "-" e f
+	| Times (e, f) -> binary "*" e f
+
+	(* Comparison operators *)
+	| Equal			(e, f) -> binary "="  e f
+	| NotEqual		(e, f) -> binary "<>" e f
+	| Greater		(e, f) -> binary ">"  e f
+	| GreaterEqual	(e, f) -> binary ">=" e f
+	| Lower			(e, f) -> binary "<"  e f
+	| LowerEqual	(e, f) -> binary "<=" e f
+
+(* expr_source [int -> exp -> unit]
+   Produce a human-readable listing of a provided expression *)
+let expr_source level exp =
+	expr_source2 level exp;
+	print_newline ()
