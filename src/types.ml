@@ -53,6 +53,8 @@ type tree =
 	(* Type declarations, a kind of let type .. in .., with constructors *)
 	| TypeDecl		of string * string list * expr
 	| ExprCtor		of string * expr
+	(* Pattern matching *)
+	| Match			of expr * (pattern * expr) list
 	(* Let bindings *)
 	| Let			of bool * pattern * expr * expr
 	(* Conditionals - if..then without else has unit as else clause *)

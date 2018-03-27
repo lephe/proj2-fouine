@@ -13,6 +13,8 @@ all-bytecode: | bin/
 	ocamlbuild -I src src/main.byte
 	@ mv main.byte $(bin-bytecode)
 
+test-all: all-native
+	@ ./test.sh -bootstrap
 test: all-native
 	@ ./test.sh
 test-ast: all-native

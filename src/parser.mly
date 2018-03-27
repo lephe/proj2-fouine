@@ -31,8 +31,7 @@ let make_unit r   : ast = { range = r; tree = LiteralUnit }
 (* Make name nodes [range -> string -> ast] *)
 let make_name r n : ast = { range = r; tree = Name n }
 
-(* Make more fuuun o/ (this function curries function definitions)
-   TODO: make_fun: should we use different ranges for each argument? *)
+(* Make more fuuun o/ (this function curries function definitions) *)
 let rec make_fun r args e : ast = match args with
 	| [] -> e
 	| arg :: tl -> { range = r; tree = Function (arg, make_fun r tl e) }
@@ -56,11 +55,6 @@ let make_ifte r e t fo : ast =
 	| Some f -> f
 	| None -> { range = (snd r, snd r); tree = LiteralUnit }
 	in { range = r; tree = If(e, t, f) }
-
-(* Make function calls *)
-let make_call e1 e2 : ast =
-	let r = range_merge e1.range e2.range in
-	{ range = r; tree = Call (e1, e2) }
 
 (* Make unary operator nodes [range -> string -> ast -> ast] *)
 let make_unary r0 op e1 : ast =
@@ -88,11 +82,6 @@ let make_binary e1 op e2 : ast =
 	| "<=" -> { range = r; tree = LowerEqual	(e1, e2) }
 	| _ -> raise (InternalError
 		("The parser suddenly forgot what " ^ op ^ " means x_x\n"))
-
-(* Make reference assigments *)
-let make_assign e f : ast =
-	let r = range_merge e.range f.range in
-	{ range = r; tree = Assign (e, f) }
 
 (* Make programs out of unstructured let lists *)
 let rec make_toplevel (decls: toplevel list) final : ast =
@@ -136,7 +125,7 @@ let rec make_toplevel (decls: toplevel list) final : ast =
 %token IF THEN ELSE
 %token FUN
 %token REF
-%token TYPE
+%token TYPE MATCH WITH
 
 /* Special end-of-file token for end-of-stream conflicts */
 %token EOF
@@ -150,12 +139,15 @@ let rec make_toplevel (decls: toplevel list) final : ast =
 %nonassoc IN
 /* Semicolon, for instruction sequences */
 %right SEMI
-/* THEN is strictly below ELSE, otherwise the "if..then" rule would always be
-   reduced regardless of whether there is an "else" clause */
+/* THEN has to be strictly below ELSE, otherwise the "if..then" rule would
+   always be reduced regardless of whether there is an "else" clause */
 %nonassoc THEN
 %nonassoc ELSE
 /* Testing reveals that assignment is around here */
 %right ASSIGN
+/* This precedence, among with WITH, solves conflicts in match cases */
+%nonassoc below_PIPE
+%left PIPE
 /* Comma is non-associative because a, b, c != (a, b), c != a, (b, c)! */
 %nonassoc below_COMMA
 %left COMMA
@@ -251,13 +243,17 @@ expr:
 	  e = expr IN f = expr
 		{ make_letf ($startpos, $endpos) recursive (Identifier n) args e f }
 
+	/* Pattern matching */
+	| MATCH e = expr WITH option(PIPE) ps = match_cases
+		{ { range = ($startpos, $endpos); tree = Match (e, ps) } }
+
 	/* Sequences are translated to anonymous bindings */
 	| e = expr SEMI f = expr
 		{ make_letv ($startpos, $endpos) Wildcard e f }
 
 	/* Reference assignments */
 	| e = expr ASSIGN f = expr
-		{ make_assign e f }
+		{ { range = range_merge e.range f.range; tree = Assign (e, f) } }
 
 	/* Conditions
 	   Not any possibility of using Menhir's option() here (AFAIK) because the
@@ -269,7 +265,7 @@ expr:
 
 	/* Function applications */
 	| e = expr se = simple_expr
-		{ make_call e se }
+		{ { range = range_merge e.range se.range; tree = Call (e, se) } }
 	/* "ref" is also a function call, priority-wise */
 	| REF se = simple_expr
 		{ { range = ($startpos, $endpos); tree = Ref se } }
@@ -333,6 +329,20 @@ simple_expr:
 	/* Dereferencing */
 	| BANG se = simple_expr
 		{ make_unary ($startpos, $endpos) "!" se }
+
+/*
+**  Match cases, for functional pleasure
+*/
+
+/* I can't use Menhir's standard library's separated_nonempty_list() becauses
+   it's not inline and it "hides" the rule precedence, which is that of PIPE */
+match_cases:
+	/* Same hack to make the rule greedy - I lack time do it 100% properly */
+	| c = match_case %prec below_PIPE { [ c ] }
+	| c = match_case PIPE cl = match_cases { c :: cl }
+
+match_case:
+	| p = pattern ARROW e = expr { (p, e) }
 
 /*
 **  Binding patterns for use by let expressions and function definitions

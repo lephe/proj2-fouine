@@ -25,9 +25,11 @@ W="\e[0m\e[1m"
 prelude="tests/prelude.ml"
 
 # Additional options to pass to fouine
-fopt="$@"
+fopt=""
 # Enable syntax highlighting if program "highlight" is present
 highlight=$(which highlight 2> /dev/null)
+# Whether to pass Fouine's -debug output to OCaml
+bootstrap=
 
 function show_output()
 {
@@ -52,7 +54,7 @@ function show_input()
 # Check that fouine output is the same as OCaml
 function compare()
 {
-	out_ocaml=$(cat "$prelude" "$1" | ocaml -stdin)
+	out_ocaml=$(cat "$prelude" "$2" | ocaml -stdin)
 	ret_ocaml="$?"
 
 	out_fouine=$(bin/fouine "$fopt" "$1")
@@ -155,12 +157,35 @@ function except()
 	return 0
 }
 
+# Check that Fouine and OCaml on Fouine's debug return the same thing
+function bootstrap()
+{
+	bin/fouine -parse "$fopt" "$1" -debug 2> /dev/null > /tmp/fouine.ml
+
+	if [[ $? != 0 ]]; then
+		echo -e "${r}●${w} $1"
+		echo "Fouine did not return 0."
+		return 0
+	fi
+
+	compare "$1" "/tmp/fouine.ml"
+}
+
+# Parse command-line options
+#   -bootstrap triggers testing fouine's -debug output through ocaml
+#   Other options go directly to fouine for debug
+for arg; do case "$arg" in
+	"-bootstrap") bootstrap=true;;
+	*) fopt="$fopt $arg";;
+esac; done
+
 echo -e "${W}"
 echo -e "Automated test types:"
 echo -e "  ${y}PARSING${W}    - Fouine should parse iff OCaml does"
 echo -e "  ${b}OCAML${W}      - Compare Fouine output with that of OCaml"
 echo -e "  ${p}ZERO${W}       - Fouine should succeed and print 0"
 echo -e "  ${r}EXCEPTIONS${W} - Fouine should catch an exception and fail"
+echo -e "  ${W}BOOTSTRAP${W}  - Compare Fouine and Fouine -debug | OCaml"
 echo -e ""
 echo -e "Unit tests are divided into folders; each folder focuses on a"
 echo -e "specific language feature."
@@ -181,7 +206,7 @@ done
 for folder in $tests_output; do
 	echo -e "${b}OCAML: $folder${w}"
 	for file in tests/$folder/*; do
-		compare "$file"
+		compare "$file" "$file"
 		performed=$(($performed + 1))
 		passed=$(($passed + 1 - $?))
 	done
@@ -209,6 +234,19 @@ for folder in $tests_except; do
 	done
 	echo ""
 done
+
+# Bootstrap tests, if -bootstrap is on
+if [[ $bootstrap ]]; then
+	for folder in $tests_output; do
+		echo -e "${W}BOOTSTRAP: $folder${w}"
+		for file in tests/$folder/*; do
+			bootstrap "$file"
+			performed=$(($performed + 1))
+			passed=$(($passed + 1 - $?))
+		done
+		echo ""
+	done
+fi
 
 # Okay!
 echo "Done! Passed $passed/$performed tests."

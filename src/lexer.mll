@@ -63,6 +63,8 @@ rule main = parse
 	| "fun"   { FUN }
 	| "ref"   { REF }
 	| "type"  { TYPE }
+	| "match" { MATCH }
+	| "with"  { WITH }
 
 	(* Literals - literal unit is "LPAR RPAR" and is built by the parser *)
 	| ['0' - '9']+ as s { INT (int_of_string s) }

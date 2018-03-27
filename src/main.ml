@@ -67,16 +67,33 @@ let exception_report func =
 	let ret = ref true in begin
 
 	try func (); ret := false with
-	| MatchError (r, pat, value) -> pre r;
+	| MatchError (r, Some pat, value) -> pre r;
 		Printf.fprintf stderr "cannot match value %s against '%s'\n"
-			(value_str value) (pattern_str pat)
+			(value_str value) (pattern_str pat);
+		range_highlight r stderr
+	| MatchError (r, None, value) -> pre r;
+		Printf.fprintf stderr "cannot match value %s in this statement\n"
+			(value_str value);
+		range_highlight r stderr
+	| MultiBind (false, r, set) -> pre r;
+		Printf.fprintf stderr ("some variables are bound twice in this " ^^
+			"pattern:\n ");
+		StringSet.iter (fun s -> Printf.fprintf stderr " %s" s) set;
+		Printf.fprintf stderr "\n";
+		range_highlight r stderr
 	| TypeError (r, exp, name) -> pre r;
 		Printf.fprintf stderr "expected %s, got %s\n" exp name;
 		range_highlight r stderr
 	| NameError (r, name) -> pre r;
-		Printf.fprintf stderr "undefined name '%s'\n" name
+		Printf.fprintf stderr "undefined name '%s'\n" name;
+		range_highlight r stderr
+	| InvalidOperator name ->
+		Printf.printf "\x1b[31merror: \x1b[0m invalid operator '%s'\n" name
 	| ZeroDivision r -> pre r;
 		Printf.fprintf stderr "division by zero\n";
+		range_highlight r stderr
+	| TypeOverload (r, name) -> pre r;
+		Printf.fprintf stderr "constructor '%s' is declared twice\n" name;
 		range_highlight r stderr
 	| Failure str
 	| InternalError str ->

@@ -9,10 +9,11 @@ exception ParseError
 
 (* MatchError - Occurs when patterns don't match value, when a recursive value
    is requested, or when patterns and arguments are mixed...
-   @arg [range]		File range of the let-binding that uses the invalid pattern
-   @arg [pattern]	The pattern that could not be matched against
+   @arg [range]		File range of the binding that uses the unmatched pattern
+   @arg [pattern option] The pattern that could not be matched against, None
+						 for match  statements
    @arg [value]		The unexpected value *)
-exception MatchError of range * pattern * value
+exception MatchError of range * pattern option * value
 
 (* MultiBind - Some variables are bound several times in the same pattern, or
    the same type name is defined twice
@@ -26,8 +27,7 @@ exception MultiBind of bool * range * StringSet.t
    @arg [range]		File range corresponding to the faulty expressions
    @arg [string] 	Expected data type
    @arg [string]	Provided data type *)
-(* TODO: Update this description once static typing is up
-   TODO: Use an algebraic type for type names, as required by functions *)
+(* TODO: Use an algebraic type for type names, as required by functions *)
 exception TypeError of range * string * string
 
 (* NameError - Occurs when referring to a name that's not defined

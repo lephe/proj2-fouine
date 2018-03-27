@@ -13,6 +13,8 @@ let rec pattern_free pat = match pat with
 	| Product l ->
 		let map = List.map pattern_free l in
 		List.fold_left StringSet.union StringSet.empty map
+	| PatternCtor (_, p) ->
+		pattern_free p
 	| _ -> StringSet.empty
 
 (* pattern_str [pattern -> string]
@@ -46,10 +48,9 @@ let rec pattern_dup pat found dups = match pat with
 (* pattern_unify [pattern -> value -> (string, value) list]
    Implements syntactic unification (actually filtering) to bind a pattern to
    a value, or raise a pattern-matching exception. Returns a list of bindings
-   on the form (name, value).
-   TODO: Reject matching if a variable is bound several times *)
+   on the form (name, value). *)
 let rec pattern_unify pat (v: value) =
-	let fail () = raise (MatchError (range_empty, pat, v)) in
+	let fail () = raise (MatchError (range_empty, Some pat, v)) in
 
 	(* Before binding, check that there isn't any duplicate names *)
 	let (_, dups) = pattern_dup pat StringSet.empty StringSet.empty in

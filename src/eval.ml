@@ -143,12 +143,27 @@ and eval exp env : value =
 		then raise (NameError (exp.range, ctor))
 		else Ctor (ctor, eval e env)
 
+	(* Pattern matching *)
+	| Match (e, cl) ->
+		let v = eval e env in
+
+		(* Try all cases in order *)
+		let rec try_cases cl v = match cl with
+		| [] -> raise (MatchError (exp.range, None, v))
+		| (p, e) :: tl ->
+			try let newenv = unify_bind p v env in eval e newenv with
+			| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
+			| MatchError _ -> try_cases tl v in
+
+		try_cases cl v
+
 	(* Use term unification (actually filtering) to get the list of all
 	   bindings, then extend the environment *)
 	| Let (recursive, pat, e, f) ->
 		if not recursive then
 			let value = eval e env in
 			try eval f (unify_bind pat value env) with
+			| MatchError (_, p, v)  -> raise (MatchError (exp.range, p, v))
 			| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
 
 		(* I implement recursion by setting a flag in the Closure object. When
@@ -203,18 +218,22 @@ and eval exp env : value =
 
 		(* Add the function to the environment if it's recursive *)
 		begin try match vfun with
+
 		| Closure (closure, Some name, pat, exp) ->
 			let env = {
 				vars = StringMap.add name vfun closure;
 				types = env.types
 			} in
 			eval exp (unify_bind pat varg env)
+
 		| Closure (closure, None, pat, exp) ->
 			let env = { vars = closure; types = env.types } in
 			eval exp (unify_bind pat varg env)
+
 		(* Reject values... *)
 		| _ -> raise (TypeError (func.range, "function", value_type vfun env))
 		with
+		| MatchError (_, p, v)  -> raise (MatchError (exp.range, p, v))
 		| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
 		end
 

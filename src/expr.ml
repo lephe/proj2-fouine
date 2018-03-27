@@ -42,6 +42,12 @@ let rec expr_free exp =
 		let un = StringSet.union (expr_free e) (expr_free f)
 		in StringSet.diff un (pattern_free pat)
 
+	(* Pattern matching is the hardest *)
+	| Match (e, cl) ->
+		let case_free (p, e) =
+			StringSet.diff (expr_free e) (pattern_free p) in
+		List.fold_left StringSet.union (expr_free e) (List.map case_free cl)
+
 	(* Functions *)
 	| Function (pat, e) ->
 		StringSet.diff (expr_free e) (pattern_free pat)
@@ -77,6 +83,10 @@ let rec expr_print indent exp =
 		List.iter (fun c -> space (); print_string ("  " ^ c ^ "\n")) ctors;
 		expr_print indent e;
 	| ExprCtor (ctor, e) -> recurse ctor [e]
+
+	| Match (e, cl) ->
+		recurse "match" [e];
+		List.iter (fun (p, e) -> recurse (pattern_str p ^ " -> ") [e]) cl
 
 	| Let (recursive, pat, e, f) ->
 		let key = if recursive then "let rec " else "let " in
@@ -142,6 +152,18 @@ let rec expr_source2 level exp =
 		Printf.printf "%s " ctor;
 		expr_source2 level e
 
+	| Match (e, cl) ->
+		print_string "(match ";
+		expr_source2 level e;
+		print_string " with ";
+		List.iter (fun (p, e) ->
+			print_string "\n";
+			space (level + 1);
+			Printf.printf "| %s -> " (pattern_str p);
+			expr_source2 (level + 1) e
+		) cl;
+		print_string ")";
+
 	(* Composed expressions. For lets, only increase indent when there are
 	   parameters (ie. function definition vs variable binding) *)
 	| Let (recursive, pat, e, f) ->
@@ -169,9 +191,10 @@ let rec expr_source2 level exp =
 
 	(* Functional expressions *)
 	| Function (pat, e) ->
-		print_string ("fun " ^ pattern_str pat ^ " ->\n");
+		print_string ("(fun " ^ pattern_str pat ^ " ->\n");
 		space (level + 1);
-		expr_source2 (level + 1) e
+		expr_source2 (level + 1) e;
+		print_string ")"
 	| Call (f, arg) ->
 		expr_source2 level f;
 		print_string " (";
@@ -180,8 +203,9 @@ let rec expr_source2 level exp =
 
 	(* Reference-related *)
 	| Bang e ->
-		print_string "!";
-		expr_source2 level e
+		print_string "!(";
+		expr_source2 level e;
+		print_string ")"
 	| Ref arg ->
 		print_string "ref (";
 		expr_source2 level arg;
@@ -199,11 +223,13 @@ let rec expr_source2 level exp =
 
 	(* Unary arithmetic operators *)
 	| UPlus e ->
-		print_string "+";
-		expr_source2 level e
+		print_string "+(";
+		expr_source2 level e;
+		print_string ")"
 	| UMinus e ->
-		print_string "-";
-		expr_source2 level e
+		print_string "-(";
+		expr_source2 level e;
+		print_string ")"
 
 	(* Binary arithmetic operators *)
 	| Plus		(e, f) -> binary "+" e f

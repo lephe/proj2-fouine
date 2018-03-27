@@ -108,5 +108,19 @@ envoyé).
 	Recursive functions, imperative features, more tests, better error
 	reports, tuples, basic ADTs.
 
+*[master d1637d6]*
+	Making the program build under Ocaml 4.02.3.
+
 ---
 
+* Implémenté le pattern matching avec match; tous les constructeurs doivent
+  posséder un argument (il n'y a pas de constants), pour des raisons de parsing
+  (et de temps... surtout).
+
+* Configuré une option -bootstrap au script de test, qui réexécute tous les
+  tests de comparison Fouine/OCaml en passant à OCaml la sortie produite par
+  Fouine avec l'option -debug au lieu du script d'origine. Placé sous la cible
+  test-all.
+
+* Peaufiné les messages d'erreur dans *Main* ; le surlignage des erreurs est un
+  peu grossier, mais ça fera l'affaire.
