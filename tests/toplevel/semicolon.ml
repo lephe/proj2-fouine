@@ -2,4 +2,4 @@
 let x = 2;;
 let y = 3;;
 let z = 4;;
-prInt (x * y * z - 24)
+print_int (x * y * z - 24)

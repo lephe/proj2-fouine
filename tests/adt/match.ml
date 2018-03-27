@@ -1,7 +1,7 @@
 (* Patter matching to destruct Algebraic Data Types *)
-type list = Empty | Cons;;
+type mylist = MyEmpty | MyCons;;
 
-match Cons 4 with
+match MyCons 4 with
 (* There are no constant constructors here, so I must leave a parameter *)
-| Empty _ -> prInt 1
-| Cons x -> prInt (x - 4)
+| MyEmpty _ -> prInt 1
+| MyCons x -> prInt (x - 4)

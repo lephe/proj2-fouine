@@ -31,6 +31,9 @@ rule main = parse
 	| '!'  { BANG }
 	| ','  { COMMA }
 	| '|'  { PIPE }
+	| '['  { LBRACKET }
+	| ']'  { RBRACKET }
+	| "::" { CONS }
 
 	(* Operators *)
 	| '+'  { PLUS }

@@ -81,19 +81,19 @@ envoyé).
   leur clôture. Un booléen dans le constructeur Closure s'en charge. Ajouté des
   tests pour ces fonctions.
 
-* Ajouté au parser de quoi traiter les aspects impératifs du langage: "!", ";",
-  ":=", "ref". Le type unit était déjà présent donc pas de souci. "ref" est un
-  mot clé, pas une fonction, mais pourrait être un builin comme prInt.
+* Ajouté au parser de quoi traiter les aspects impératifs du langage: `!`, `;`,
+  `:=`, `ref`. Le type unit était déjà présent donc pas de souci. `ref` est un
+  mot clé, pas une fonction, mais pourrait être un builtin (prInt aussi).
 
 * Imlémenté un module *Memory* pour la gestion de la mémoire impérative, en
-  utilisant innocement une table de hachage sur des entiers. Implémenté "ref",
-  "!" et ":=". ";" est traduit comme un "let _ = .. in .." pour la simplicité.
+  utilisant innocement une table de hachage sur des entiers. Implémenté `ref`,
+  `!` et `:=`. `;` est traduit comme un `let _ = .. in ..` pour la simplicité.
 
 * Ajouté d'autres tests de fonctions récursives, des tests pour les
   fonctionnalités impératives, et des tests pour vérifier que les erreurs sont
   bien détectées.
 
-* Réimplementé range_highlight pour afficher la source faultive en cas
+* Réimplementé `range_highlight` pour afficher la source faultive en cas
   d'erreur (seulement si le script vient d'un fichier). On pourrait améliorer
   en stockant toute la source dans un objet Bytes avant de lexer, mais on
   perdrait l'aspect online.
@@ -117,10 +117,22 @@ envoyé).
   posséder un argument (il n'y a pas de constants), pour des raisons de parsing
   (et de temps... surtout).
 
-* Configuré une option -bootstrap au script de test, qui réexécute tous les
+* Configuré une option `-bootstrap` au script de test, qui réexécute tous les
   tests de comparison Fouine/OCaml en passant à OCaml la sortie produite par
-  Fouine avec l'option -debug au lieu du script d'origine. Placé sous la cible
-  test-all.
+  Fouine avec l'option `-debug` au lieu du script d'origine. Placé sous la
+  cible `make test-all`.
 
 * Peaufiné les messages d'erreur dans *Main* ; le surlignage des erreurs est un
   peu grossier, mais ça fera l'affaire.
+
+*[master 9166661]*
+	Pattern matching, bootstrap tests, more error reports.
+
+---
+
+* Ajouté un message d'aide sous `./fouine --help`. C'est plus accueillant.
+
+* Ajouté sur une impulsion du sucre syntaxique pour les listes, en les ramenant
+  à un ADT `list = Empty | Const`. Implémenté de quoi les déconstruire joliment
+  dans les match.
+

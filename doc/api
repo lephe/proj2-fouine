@@ -1,0 +1,59 @@
+#---
+#	This is a description of the interpreter's API, organized in modules.
+#	Because the .mli files are not hand-written, more symbols may be
+#	exported by the modules, but they will never be referred to.
+#	This listing rules.
+#---
+
+# Complex type definitions are centralized here, leaving function
+# implementation to the other modules.
+Types
+	type range
+	type pattern
+	type tree
+	type expr
+	type value
+	type env
+	type memory
+	type memory_addr
+
+	module EnvMap
+	module StringSet
+
+Eval
+	value_type()		# Value type as string
+	value_str()		# Get textual representation (without newline)
+	value_print()		# Print value to stdout (with newline)
+	eval()			# Evaluate an expression
+
+Exceptions
+	MatchError		(range, pattern, value)
+	TypeError		(range, string, string)
+	NameError		(range, string)
+	InvalidOperator		(string)
+	ZeroDivision		(range)
+	TypeOverload		(range, string)
+	Error			(range, string)
+	InternalError		(string)
+
+Expr
+	expr_free()		# Get the free variables
+	expr_print()		# Print AST in terminal
+	expr_source()		# Print reconstituted "source" in terminal
+
+Memory
+	memory_addr_str()	# String representation of address
+	memory_create()		# Store value, create and return reference
+	memory_get()		# Get pointed value
+	memory_update()		# Update pointed value
+
+Pattern
+	pattern_free()		# Get bound variables
+	pattern_str()		# String representation of pattern
+	pattern_unify()		# Match pattern, unify terms, bind names
+
+Util
+	range_empty		# An empty range object (placeholder)
+	range_str()		# String representation "file:line:col"
+	range_merge()		# Get a larger range that covers arguments
+	range_highlight()	# Highlight a section of the source in terminal

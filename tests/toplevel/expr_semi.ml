@@ -2,4 +2,4 @@
 
 2 * 3;;
 let b = 5 in 7 * b;;
-prInt 4
+print_int 4

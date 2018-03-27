@@ -3,4 +3,4 @@
 let f x = x
 let z = 25;;
 let p = f
-prInt (2 - (z + 4))
+print_int (2 - (z + 4))

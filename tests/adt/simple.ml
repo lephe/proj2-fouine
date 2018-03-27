@@ -1,6 +1,7 @@
-type list = Empty | Cons
-let v = Empty 3
-let x = Cons (v, -3);;
+(* Simple constructors *)
+type mylist = MyEmpty | MyCons
+let v = MyEmpty 3
+let x = MyCons (v, -3);;
 
-let Cons (Empty a, b) = x in
+let MyCons (MyEmpty a, b) = x in
 prInt (a + b)

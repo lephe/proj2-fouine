@@ -1,9 +1,6 @@
-# Build and binary directory
+# Build directory and binary files
 _build
-bin/fouine
+fouine
 
 # Sublime Text files
 *.sublime-*
-
-# Individual notes about the project
-notes

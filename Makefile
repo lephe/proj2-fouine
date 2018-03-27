@@ -2,11 +2,11 @@
 
 all: all-native
 
-bin-native	= bin/fouine
-bin-bytecode	= bin/fouine.byte
+bin-native	= fouine
+bin-bytecode	= fouine.byte
 
 all-native: | bin/
-	ocamlbuild -lib unix -use-menhir -menhir ../bin/menhir.sh src/main.native
+	ocamlbuild -lib unix -use-menhir -menhir ../menhir.sh src/main.native
 	@ mv main.native $(bin-native)
 
 all-bytecode: | bin/

@@ -8,6 +8,7 @@ open Lexing
 
 (* Command-line options *)
 type options = {
+	help:	bool;		(* Show help message and return *)
 	file:	string;		(* Specifies the file to execute *)
 	stdin:	bool;		(* Read from stdin. Has precedence over "file" *)
 	ast:	bool;		(* Display the AST before executing *)
@@ -18,6 +19,7 @@ type options = {
 
 (* Default configuration mode - run silently *)
 let default_conf = {
+	help	= false;
 	file 	= "";
 	stdin	= false;
 	ast		= false;
@@ -34,6 +36,7 @@ let options_parse argv =
 	let rec options_one i conf =
 		if i >= Array.length argv then conf else
 		match argv.(i) with
+		| "--help"	-> options_one (i + 1) { conf with help = true }
 		| "-stdin"	-> options_one (i + 1) { conf with stdin = true }
 		| "-ast"	-> options_one (i + 1) { conf with ast = true }
 		| "-debug"	-> options_one (i + 1) { conf with debug = true }
@@ -42,6 +45,8 @@ let options_parse argv =
 
 	(* Perform some checks *)
 	let conf = ref (options_one 1 default_conf) in
+
+	if !conf.help then !conf else begin
 
 	(* Do not specify both a file name and stdin input *)
 	if !conf.file <> "" && !conf.stdin then begin
@@ -52,10 +57,14 @@ let options_parse argv =
 	(* Specify at least one of file input and stdin input *)
 	if !conf.file = "" && not !conf.stdin then begin
 		conf := { !conf with _ok = false };
-		print_string "error: no file name and -stdin not specified\n"
+		Printf.fprintf stderr "error: no file name and -stdin not specified\n"
 	end;
 
-	!conf
+	(* Help message in case something goes wrong *)
+	if not (!conf._ok) then
+		Printf.fprintf stderr "See '%s --help' for command details.\n"argv.(0);
+
+	!conf end
 
 (* exception_report [(unit -> unit) -> bool]
    A wrapper for exception reporting in the terminal. Returns true if an
@@ -101,10 +110,25 @@ let exception_report func =
 
 	end; !ret
 
+(* The help message for the command-line interface *)
+let help_message =
+"fouine - an interpreter for a subset of Caml\n" ^
+"usage: fouine [options...] <file>\n" ^
+"       fouine -stdin [options...]\n" ^
+"\n" ^
+"Available options:\n" ^
+"  -stdin    Read from stdin, not file (expect shorter error diagnoses)\n" ^
+"  -ast      After parsing, show an AST\n" ^
+"  -debug    After parsing, show regenerated sources (overrides -ast)\n" ^
+"  -parse    Stop after parsing; do not evaluate\n"
+
 let s_get_this_show_on_the_road =
 	(* Parse command_line options *)
 	let conf = options_parse Sys.argv in
 	if not conf._ok then exit 1;
+
+	(* Show help message if requested - then leave *)
+	if conf.help then (print_string help_message; exit 0);
 
 	(* Open the source script *)
 	let (channel, name) =
@@ -130,8 +154,14 @@ let s_get_this_show_on_the_road =
 	if conf.parse then exit 0;
 
 	(* Evaluate the source tree. Exceptions are caught here (nowhere else) *)
+	let env_vars = StringMap.empty in
+	(* I define the Empty and Cons constructors by default, for lists *)
+	let defaults = [ ("Empty", "list"); ("Cons", "list") ] in
+	let env_types = List.fold_left (fun m (x, y) -> StringMap.add x y m)
+		StringMap.empty defaults in
+
 	let failed = exception_report (fun () ->
-		let env = { vars = StringMap.empty; types = StringMap.empty } in
+		let env = { vars = env_vars; types = env_types } in
 		eval ast env
 	) in
 	exit (if failed then 1 else 0)

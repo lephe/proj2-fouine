@@ -5,7 +5,7 @@ tests_parsing="toplevel"
 # Output tests
 tests_output="calc let func rec ref tuple"
 # Zero tests
-tests_zero="adt"
+tests_zero="adt list"
 # Exceptions tests
 tests_except="except"
 
@@ -57,13 +57,13 @@ function compare()
 	out_ocaml=$(cat "$prelude" "$2" | ocaml -stdin)
 	ret_ocaml="$?"
 
-	out_fouine=$(bin/fouine "$fopt" "$1")
+	out_fouine=$(./fouine "$fopt" "$1")
 	ret_fouine="$?"
 
 	if [[ $out_ocaml == $out_fouine && $ret_ocaml == 0
 		&& $ret_fouine == 0 ]]; then
 		echo -e "${g}●${w} $1"
-		return 1
+		return 0
 	fi
 
 	echo -e "${r}●${w} $1"
@@ -72,25 +72,25 @@ function compare()
 	show_input "$1"
 	echo ""
 
-	return 0
+	return 1
 }
 
 # Check that the source parses in fouine as in OCaml
 function parse()
 {
-	cat "$prelude" "$1" | ocaml -stdin 1> /dev/null 2>&1
+	ocaml "$1" 1> /dev/null 2>&1
 	# Check only the return status
 	ret_ocaml="$?"
 	[[ $ret_ocaml != 0 ]] && ret_ocaml=1
 
-	bin/fouine -parse "$fopt" "$1" 1> /dev/null 2>&1
+	./fouine -parse "$fopt" "$1" 1> /dev/null 2>&1
 	# Same here, only the return status matters
 	ret_fouine="$?"
 	[[ $ret_fouine != 0 ]] && ret_fouine=1
 
 	if [[ $ret_ocaml == $ret_fouine ]]; then
 		echo -e "${g}●${w} $ret_ocaml $1"
-		return 1
+		return 0
 	fi
 
 	echo -e "${r}●${w} $1"
@@ -98,54 +98,54 @@ function parse()
 	show_input "$1"
 	echo ""
 
-	return 0
+	return 1
 }
 
 # Check that output is zero (when code cannot be executed by OCaml
 function zero()
 {
-	out=$(bin/fouine "$fopt" "$1")
+	out=$(./fouine "$fopt" "$1")
 	ret="$?"
 
 	if [[ $ret != 0 ]]; then
 		echo -e "${r}●${w} $1"
 		echo "An exception occurred!"
 		show_input "$1"
-		return 0
+		return 1
 	fi
 
 	if [[ $out != 0 ]]; then
 		echo -e "${r}●${w} $1"
 		echo "Fouine did not print 0."
 		show_input "$1"
-		return 0
+		return 1
 	fi
 
 	echo -e "${g}●${w} $1"
-	return 1
+	return 0
 }
 
 # Check that exceptions are detected and reported
 function except()
 {
 	# Check that the file parses, but fails *at runtime*
-	bin/fouine -parse "$fopt" "$1" >/dev/null 2>&1
+	./fouine -parse "$fopt" "$1" >/dev/null 2>&1
 	ret="$?"
 
 	if [[ $ret != 0 ]]; then
 		echo -e "${r}●${w} $1"
 		echo "Failed during parsing."
 		show_input "$1"
-		return 0
+		return 1
 	fi
 
-	stderr=$( (bin/fouine "$fopt" "$1" 3>&2 2>&1 1>&3-) 2> /dev/null )
+	stderr=$( (./fouine "$fopt" "$1" 3>&2 2>&1 1>&3-) 2> /dev/null )
 	ret="$?"
 
 	# Check that the return status is nonzero AND stderr is not empty
 	if [[ $ret != 0 && $stderr ]]; then
 		echo -e "${g}●${w} $1"
-		return 1
+		return 0
 	fi
 
 	echo -e "${r}●${w} $1"
@@ -154,18 +154,18 @@ function except()
 	show_input "$1"
 	echo ""
 
-	return 0
+	return 1
 }
 
 # Check that Fouine and OCaml on Fouine's debug return the same thing
 function bootstrap()
 {
-	bin/fouine -parse "$fopt" "$1" -debug 2> /dev/null > /tmp/fouine.ml
+	./fouine -parse "$fopt" "$1" -debug 2> /dev/null > /tmp/fouine.ml
 
 	if [[ $? != 0 ]]; then
 		echo -e "${r}●${w} $1"
 		echo "Fouine did not return 0."
-		return 0
+		return 1
 	fi
 
 	compare "$1" "/tmp/fouine.ml"
@@ -196,8 +196,8 @@ for folder in $tests_parsing; do
 	echo -e "${y}PARSING: $folder${w}"
 	for file in tests/$folder/*; do
 		parse "$file"
-		performed=$(($performed + 1))
 		passed=$(($passed + 1 - $?))
+		performed=$(($performed + 1))
 	done
 	echo ""
 done
@@ -207,8 +207,8 @@ for folder in $tests_output; do
 	echo -e "${b}OCAML: $folder${w}"
 	for file in tests/$folder/*; do
 		compare "$file" "$file"
-		performed=$(($performed + 1))
 		passed=$(($passed + 1 - $?))
+		performed=$(($performed + 1))
 	done
 	echo ""
 done
@@ -218,8 +218,8 @@ for folder in $tests_zero; do
 	echo -e "${p}ZERO: $folder${w}"
 	for file in tests/$folder/*; do
 		zero "$file"
-		performed=$(($performed + 1))
 		passed=$(($passed + 1 - $?))
+		performed=$(($performed + 1))
 	done
 	echo ""
 done
@@ -229,8 +229,8 @@ for folder in $tests_except; do
 	echo -e "${r}EXCEPTIONS: $folder${w}"
 	for file in tests/$folder/*; do
 		except "$file"
-		performed=$(($performed + 1))
 		passed=$(($passed + 1 - $?))
+		performed=$(($performed + 1))
 	done
 	echo ""
 done
@@ -241,8 +241,8 @@ if [[ $bootstrap ]]; then
 		echo -e "${W}BOOTSTRAP: $folder${w}"
 		for file in tests/$folder/*; do
 			bootstrap "$file"
-			performed=$(($performed + 1))
 			passed=$(($passed + 1 - $?))
+			performed=$(($performed + 1))
 		done
 		echo ""
 	done

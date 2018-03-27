@@ -24,12 +24,6 @@ type toplevel =
 
 (* Make integer nodes [range -> int -> ast] *)
 let make_int  r i : ast = { range = r; tree = LiteralInt i }
-(* Make bool literals [range -> bool -> ast] *)
-let make_bool r b : ast = { range = r; tree = LiteralBool b }
-(* Make unit nodes [range -> ast] *)
-let make_unit r   : ast = { range = r; tree = LiteralUnit }
-(* Make name nodes [range -> string -> ast] *)
-let make_name r n : ast = { range = r; tree = Name n }
 
 (* Make more fuuun o/ (this function curries function definitions) *)
 let rec make_fun r args e : ast = match args with
@@ -83,7 +77,7 @@ let make_binary e1 op e2 : ast =
 	| _ -> raise (InternalError
 		("The parser suddenly forgot what " ^ op ^ " means x_x\n"))
 
-(* Make programs out of unstructured let lists *)
+(* Make programs out of unstructured let lists [toplevel list -> ast] *)
 let rec make_toplevel (decls: toplevel list) final : ast =
 	match decls with
 	| [] -> final
@@ -95,6 +89,17 @@ let rec make_toplevel (decls: toplevel list) final : ast =
 	| Type (r, name, ctors) :: tail ->
 		let f = make_toplevel tail final in
 		{ range = r; tree = TypeDecl (name, ctors, f) }
+
+(* An empty list [range -> ast] *)
+let make_list_empty r : ast =
+	let (b, _) = r in
+	let nothing = { range = (b, b); tree = LiteralUnit } in
+	{ range = r; tree = ExprCtor ("Empty", nothing) }
+
+(* A list constructor [range -> expr -> expr -> ast] *)
+let make_list_cons r hd tl : ast =
+	let pair = { range = r; tree = ExprTuple [hd; tl] } in
+	{ range = r; tree = ExprCtor ("Cons", pair) }
 
 %}
 
@@ -111,6 +116,7 @@ let rec make_toplevel (decls: toplevel list) final : ast =
 /* Punctuation */
 %token LPAR RPAR SEMI SEMISEMI
 %token ARROW UND ASSIGN BANG COMMA PIPE
+%token LBRACKET RBRACKET CONS
 
 /* Operators */
 %token PLUS MINUS TIMES DIV
@@ -134,10 +140,8 @@ let rec make_toplevel (decls: toplevel list) final : ast =
 **	Precedence relations (mainly reproducing those of OCaml)
 */
 
-/* Nothing is "larger" than a let..in statement, hence IN structures the
-   program at the outermost level */
-%nonassoc IN
 /* Semicolon, for instruction sequences */
+%nonassoc below_SEMI
 %right SEMI
 /* THEN has to be strictly below ELSE, otherwise the "if..then" rule would
    always be reduced regardless of whether there is an "else" clause */
@@ -157,6 +161,8 @@ let rec make_toplevel (decls: toplevel list) final : ast =
    nothing in the parser about NE, GE and LE. A bit of experimentation
    suggested that they all have the same precedence level */
 %left EQ NE GT GE LT LE
+/* List constructors */
+%right CONS
 /* Usual arithmetic operations, and unknown (user-defined) operators */
 %left PLUS MINUS OPERATOR
 %left TIMES DIV
@@ -166,12 +172,13 @@ let rec make_toplevel (decls: toplevel list) final : ast =
    expressions have the highest priority, so that we always shift them. This
    happens especially in cases like "MINUS NAME . INT" where we want to shift
    the integer to reduce the function call before reducing the unary minus */
-%nonassoc BEGIN INT BOOL NAME LPAR BANG
+%nonassoc BEGIN INT BOOL NAME LPAR BANG LBRACKET
 
 /* Our CST will be annotated with line and column numbers */
 %start <Types.expr> toplevel
 /* Give some types to improve error messages from type inference */
 %type <toplevel> toplevel_decl
+%type <Types.expr> expr_list
 
 %%
 
@@ -182,8 +189,8 @@ let rec make_toplevel (decls: toplevel list) final : ast =
 toplevel:
 	/* Specification says that in the absence of a final expression, 0 is
 	   used in place */
-	| EOF { make_int ($startpos, $endpos) 0 }
-	| e = expr EOF { e }
+	| SEMISEMI EOF | EOF { make_int ($startpos, $endpos) 0 }
+	| e = seq_expr EOF { e }
 
 	/* The following rules allow the use of ";;" and omitting the "in" at
 	   the root of the source tree (following Ocaml syntax) */
@@ -196,7 +203,7 @@ toplevel:
 
 	/* The following rule allows writing bare expressions before a ";;". The
 	   string "expr;;" resolves to "let _ = expr;;" */
-	| e = expr SEMISEMI p = toplevel
+	| e = seq_expr SEMISEMI p = toplevel
 		{ make_toplevel [ Let (e.range, false, Wildcard, [], e) ]  p }
 
 toplevel_seq:
@@ -218,6 +225,12 @@ toplevel_decl:
 **  General expressions
 */
 
+seq_expr:
+	/* Make the rule greedy - see somewhere below */
+	| e = expr %prec below_SEMI { e }
+	| e = expr SEMI f = seq_expr
+		{ make_letv ($startpos, $endpos) Wildcard e f }
+
 expr:
 	/* Simple expressions are literals and enclosed expressions - roughly the
 	   things that can be passed to the highest-priority operator, function
@@ -233,23 +246,20 @@ expr:
 
 	/* Value bindings. Note that bound values are expressions, not just
 	   literals. They will be unified with the pattern at runtime */
-	| LET recursive = boption(REC) pat = pattern EQ e = expr IN f = expr
+	| LET recursive = boption(REC) pat = pattern EQ e = seq_expr IN
+	  f = seq_expr
 		{ make_letv ($startpos, $endpos) pat e f }
 
 	/* Function bindings. The name must not be a pattern, thus the need for two
 	   productions. The argument list must not be empty to avoid conflicts with
 	   the previous production */
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
-	  e = expr IN f = expr
+	  e = seq_expr IN f = seq_expr
 		{ make_letf ($startpos, $endpos) recursive (Identifier n) args e f }
 
 	/* Pattern matching */
-	| MATCH e = expr WITH option(PIPE) ps = match_cases
+	| MATCH e = seq_expr WITH option(PIPE) ps = match_cases
 		{ { range = ($startpos, $endpos); tree = Match (e, ps) } }
-
-	/* Sequences are translated to anonymous bindings */
-	| e = expr SEMI f = expr
-		{ make_letv ($startpos, $endpos) Wildcard e f }
 
 	/* Reference assignments */
 	| e = expr ASSIGN f = expr
@@ -258,9 +268,9 @@ expr:
 	/* Conditions
 	   Not any possibility of using Menhir's option() here (AFAIK) because the
 	   two rules have different prioritIes - ELSE being higher than THEN */
-	| IF e = expr THEN t = expr ELSE f = expr
+	| IF e = seq_expr THEN t = expr ELSE f = expr
 		{ make_ifte ($startpos, $endpos) e t (Some f) }
-	| IF e = expr THEN t = expr
+	| IF e = seq_expr THEN t = expr
 		{ make_ifte ($startpos, $endpos) e t None }
 
 	/* Function applications */
@@ -274,7 +284,7 @@ expr:
 		{ { range = ($startpos, $endpos); tree = ExprCtor (c, se) } }
 
 	/* Function definitions */
-	| FUN pl = nonempty_list(pattern) ARROW e = expr
+	| FUN pl = nonempty_list(pattern) ARROW e = seq_expr
 		{ make_fun ($startpos, $endpos) pl e }
 
 	/* Usual arithmetic operations */
@@ -295,6 +305,10 @@ expr:
 	| e = expr GE f = expr		{ make_binary e ">=" f }
 	| e = expr LT f = expr		{ make_binary e "<"  f }
 	| e = expr LE f = expr		{ make_binary e "<=" f }
+
+	/* List const */
+	| e = expr CONS f = expr
+		{ make_list_cons ($startpos, $endpos) e f }
 
 	/* Rule with special precedence: unary plus and unary minus */
 	| PLUS  e = expr %prec prec_UPLUS
@@ -317,9 +331,9 @@ expr_comma_list:
 simple_expr:
 	/* Literal integers or variable names, units */
 	| i = INT   { make_int  ($startpos, $endpos) i }
-	| b = BOOL  { make_bool ($startpos, $endpos) b }
-	| n = NAME  { make_name ($startpos, $endpos) n }
-	| LPAR RPAR { make_unit ($startpos, $endpos) }
+	| b = BOOL  { { range = ($startpos, $endpos); tree = LiteralBool b } }
+	| n = NAME  { { range = ($startpos, $endpos); tree = Name n } }
+	| LPAR RPAR { { range = ($startpos, $endpos); tree = LiteralUnit } }
 
 	/* Expressions enclosed within parentheses or begin..end */
 	| LPAR e = expr RPAR
@@ -329,6 +343,18 @@ simple_expr:
 	/* Dereferencing */
 	| BANG se = simple_expr
 		{ make_unary ($startpos, $endpos) "!" se }
+
+	/* Lists */
+	| LBRACKET e = expr_list RBRACKET { e }
+
+expr_list:
+	| /* empty */
+		{ make_list_empty ($startpos, $endpos) }
+	| e = expr
+		{ let r = ($startpos, $endpos) in
+			make_list_cons r e (make_list_empty r) }
+	| e = expr SEMI l = expr_list
+		{ make_list_cons ($startpos, $endpos) e l }
 
 /*
 **  Match cases, for functional pleasure
@@ -355,6 +381,8 @@ pattern:
 	| c = CTOR sp = simple_pattern { PatternCtor (c, sp) }
 	/* Tuples - same technique as the tuple expressions above */
 	| pcl = pattern_comma_list %prec below_COMMA { Product (List.rev pcl) }
+	/* List constructors, which is a binary operator */
+	| p = pattern CONS q = pattern { PatternCtor ("Cons", Product [p; q]) }
 
 simple_pattern:
 	/* Basic patterns: variable names and the wildcard */
@@ -366,6 +394,17 @@ simple_pattern:
 	| LPAR RPAR		{ PatternUnit }
 	/* Parentheses may also appear in patterns */
 	| LPAR p = pattern RPAR { p }
+	/* List patterns */
+	| LBRACKET p = pattern_list RBRACKET { p }
+
+pattern_list:
+	| /* empty */
+		{ PatternCtor ("Empty", PatternUnit) }
+	| p = pattern
+		{ let last = PatternCtor ("Empty", PatternUnit) in
+		  PatternCtor ("Cons", Product [p; last]) }
+	| p = pattern SEMI pl = pattern_list
+		{ PatternCtor ("Cons", Product [p; pl]) }
 
 pattern_comma_list:
 	| p = pattern COMMA q = pattern { [q; p] }

@@ -1,5 +1,7 @@
 (*
 **	Expr - Expression representation and evaluation
+**  Note : the code in this file is not very readable because of the not-so-
+**  interesting pattern matching in expr_print and expr_source. I apologize.
 *)
 
 open Types
@@ -86,7 +88,10 @@ let rec expr_print indent exp =
 
 	| Match (e, cl) ->
 		recurse "match" [e];
-		List.iter (fun (p, e) -> recurse (pattern_str p ^ " -> ") [e]) cl
+		List.iter (fun (p, e) ->
+			space ();
+			recurse (pattern_str p ^ " -> ") [e]
+		) cl
 
 	| Let (recursive, pat, e, f) ->
 		let key = if recursive then "let rec " else "let " in
