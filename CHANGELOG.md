@@ -103,3 +103,10 @@ envoyé).
 
 * Ajouté la déclaration des types algébriques et leur utilisation dans les
   patterns de let. Pas de match pour l'instant.
+
+*[master 1a3c270]*
+	Recursive functions, imperative features, more tests, better error
+	reports, tuples, basic ADTs.
+
+---
+

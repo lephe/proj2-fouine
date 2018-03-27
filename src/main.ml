@@ -4,6 +4,7 @@ open Expr
 open Eval
 open Exceptions
 open Pattern
+open Lexing
 
 (* Command-line options *)
 type options = {

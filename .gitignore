@@ -1,6 +1,6 @@
 # Build and binary directory
 _build
-bin
+bin/fouine
 
 # Sublime Text files
 *.sublime-*

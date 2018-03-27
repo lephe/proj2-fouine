@@ -124,7 +124,9 @@ and eval exp env : value =
 			then raise (TypeOverload (exp.range, ctor)) in
 
 		(* Check that the type name is not already used *)
-		if List.exists (fun n -> StringMap.find_opt n env.types = Some name)
+		if List.exists (fun n ->
+			try StringMap.find n env.types = name
+			with Not_found -> false)
 			ctors
 		then raise (MultiBind (true, exp.range, StringSet.singleton name)) else
 

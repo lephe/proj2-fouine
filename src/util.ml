@@ -2,7 +2,9 @@
 **	Util - Utility functions, independent from the core interpreter
 *)
 
+(* Open the Lexing module so that range's record type is fully qualified *)
 open Types
+open Lexing
 
 (*
 	Range objects
