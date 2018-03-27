@@ -3,12 +3,14 @@ open Util
 open Expr
 open Eval
 open Exceptions
+open Pattern
 
 (* Command-line options *)
 type options = {
 	file:	string;		(* Specifies the file to execute *)
 	stdin:	bool;		(* Read from stdin. Has precedence over "file" *)
 	ast:	bool;		(* Display the AST before executing *)
+	debug:	bool;		(* Show program source, akin to -ast *)
 	parse:	bool;		(* Stop after parsing (for parsing-only tests) *)
 	_ok:	bool;		(* Says whether the configuration is valid *)
 }
@@ -18,16 +20,22 @@ let default_conf = {
 	file 	= "";
 	stdin	= false;
 	ast		= false;
+	debug	= false;
 	parse	= false;
 	_ok		= true;
 }
 
+(* options_parse [string array -> options]
+   Parses command-line arguments. Emits live warnings if the options are not
+   consistent, and clears the _ok bit of the returned record if critical errors
+   are encountered *)
 let options_parse argv =
 	let rec options_one i conf =
 		if i >= Array.length argv then conf else
 		match argv.(i) with
 		| "-stdin"	-> options_one (i + 1) { conf with stdin = true }
 		| "-ast"	-> options_one (i + 1) { conf with ast = true }
+		| "-debug"	-> options_one (i + 1) { conf with debug = true }
 		| "-parse"	-> options_one (i + 1) { conf with parse = true }
 		| filename	-> options_one (i + 1) { conf with file = filename } in
 
@@ -48,14 +56,41 @@ let options_parse argv =
 
 	!conf
 
-let _ =
+(* exception_report [(unit -> unit) -> bool]
+   A wrapper for exception reporting in the terminal. Returns true if an
+   exception occurred, false otherwise *)
+let exception_report func =
+	let pre range =
+		let r = range_str range in
+		Printf.fprintf stderr "\x1b[1m%s: \x1b[31merror: \x1b[0m" r in
+	let ret = ref true in begin
+
+	try func (); ret := false with
+	| MatchError (r, pat, value) -> pre r;
+		Printf.fprintf stderr "cannot match value %s against '%s'\n"
+			(value_str value) (pattern_str pat)
+	| TypeError (r, exp, name) -> pre r;
+		Printf.fprintf stderr "expected %s, got %s\n" exp name;
+		range_highlight r stderr
+	| NameError (r, name) -> pre r;
+		Printf.fprintf stderr "undefined name '%s'\n" name
+	| ZeroDivision r -> pre r;
+		Printf.fprintf stderr "division by zero\n";
+		range_highlight r stderr
+	| Failure str
+	| InternalError str ->
+		Printf.fprintf stderr "error: an exception occurred x_x\n'%s'\n" str
+
+	end; !ret
+
+let s_get_this_show_on_the_road =
 	(* Parse command_line options *)
 	let conf = options_parse Sys.argv in
 	if not conf._ok then exit 1;
 
 	(* Open the source script *)
 	let (channel, name) =
-			if conf.stdin then (stdin, "<standard input>")
+			if conf.stdin then (stdin, "")
 			else (open_in conf.file, conf.file)
 	in
 
@@ -69,16 +104,16 @@ let _ =
 	(* Close the source channel if it's a file *)
 	if not conf.stdin then close_in channel;
 
-	(* Display the AST if -ast is on *)
-	if conf.ast then expr_print 0 ast;
+	(* Display the source if -debug is on, or the AST if -ast is on *)
+	if conf.debug then expr_source 0 ast
+	else if conf.ast then expr_print 0 ast;
 
-	(* Stop if -parse is on *)
+	(* Stop now if -parse is on, we don't need to evaluate *)
 	if conf.parse then exit 0;
 
-	(* Evaluate the source tree. Exceptions should not reach the toplevel to
-	   preserve a return status of 0 if parsing succeeds (automatic testing) *)
-	try let _ = eval ast EnvMap.empty in () with
-	| TypeError (range, expected, name) ->
-		print_string (range_str range ^ ": expected " ^ expected ^ ", got "
-		^ name ^ "\n")
-	| Failure str -> print_string ("Exception occurred x_x\n'" ^ str ^ "'\n")
+	(* Evaluate the source tree. Exceptions are caught here (nowhere else) *)
+	let failed = exception_report (fun () ->
+		let env = { vars = StringMap.empty; types = StringMap.empty } in
+		eval ast env
+	) in
+	exit (if failed then 1 else 0)

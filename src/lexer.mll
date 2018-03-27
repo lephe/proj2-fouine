@@ -23,16 +23,20 @@ rule main = parse
 	(* Punctuation *)
 	| '('  { LPAR }
 	| ')'  { RPAR }
-	| ";;" { DSC }
+	| ';'  { SEMI }
+	| ";;" { SEMISEMI }
 	| "->" { ARROW }
 	| '_'  { UND }
-
-(*	| ','  { COMMA } *)
+	| ":=" { ASSIGN }
+	| '!'  { BANG }
+	| ','  { COMMA }
+	| '|'  { PIPE }
 
 	(* Operators *)
 	| '+'  { PLUS }
 	| '-'  { MINUS }
 	| '*'  { TIMES }
+	| '/'  { DIV }
 	| '='  { EQ }
 	| "<>" { NE }
 	| '<'  { LT }
@@ -45,7 +49,7 @@ rule main = parse
 	   I don't support user-defined operators, but I still need to detect them
 	   because they could accidently be parsed in a wrong way, such as "--2"
 	   being read as "-(-(2))" *)
-	| ['+' '-'] ['+' '-']+ as op { OPERATOR op }
+	| ['+' '-' '!'] ['+' '-' '!']+ as op { OPERATOR op }
 
 	(* Keywords *)
 	| "let"   { LET }
@@ -57,12 +61,18 @@ rule main = parse
 	| "then"  { THEN }
 	| "else"  { ELSE }
 	| "fun"   { FUN }
+	| "ref"   { REF }
+	| "type"  { TYPE }
 
 	(* Literals - literal unit is "LPAR RPAR" and is built by the parser *)
 	| ['0' - '9']+ as s { INT (int_of_string s) }
 	| "true"  { BOOL true }
 	| "false" { BOOL false }
-	| ['a' - 'z'] ['a' - 'z' 'A' - 'Z' '_' '0' - '9']* as s { NAME s }
+	| ['a' - 'z' '_'] ['a' - 'z' 'A' - 'Z' '_' '\'' '0' - '9']* as s { NAME s }
+
+	(* Constructors have this uppercase style *)
+	| ['A' - 'Z' '_'] ['a' - 'z' 'A' - 'Z' '_' '\'' '0' - '9']* as s { CTOR s }
+
 
 	(* End Of File *)
 	| eof { EOF }

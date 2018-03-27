@@ -8,7 +8,7 @@
 *)
 
 (* range
-   Pairs of Lexing.position objects that delimitate expressions in the code. A
+   Pairs of Lexing.position objects that mark out expressions in the code. A
    single Lexing.position allows showing the line where the error happens; two
    make it possible to highlight faulty expressions *)
 type range = Lexing.position * Lexing.position
@@ -18,8 +18,18 @@ type range = Lexing.position * Lexing.position
    indirect bindings in function arguments *)
 type pattern =
 	| Identifier of string
+	(* Ignored binding "let _ = ..." or wildcard "_" *)
 	| Wildcard
-	(* TODO: pattern: Add product types "(x, y)", ADT "Constructor x"... *)
+	(* Literal values, must match exactly. I can't really put a "value" here
+	   because patterns are more restricted and can (obviously) be used with
+	   types that support comparison; functions don't. *)
+	| PatternInt of int
+	| PatternBool of bool
+	| PatternUnit
+	(* Product types *)
+	| Product of pattern list
+	(* ADT constructors *)
+	| PatternCtor of string * pattern
 
 (* Expression types: tree, expr
 
@@ -40,6 +50,9 @@ type tree =
 	| LiteralBool	of bool
 	| LiteralUnit
 	| Name			of string
+	(* Type declarations, a kind of let type .. in .., with constructors *)
+	| TypeDecl		of string * string list * expr
+	| ExprCtor		of string * expr
 	(* Let bindings *)
 	| Let			of bool * pattern * expr * expr
 	(* Conditionals - if..then without else has unit as else clause *)
@@ -47,6 +60,12 @@ type tree =
 	(* Functions - curried because fouine has currying *)
 	| Function		of pattern * expr
 	| Call			of expr * expr
+	(* References *)
+	| Ref			of expr
+	| Bang			of expr
+	| Assign		of expr * expr
+	(* Tuples *)
+	| ExprTuple		of expr list
 	(* Unary arithmetic operators (int -> int) *)
 	| UPlus			of expr
 	| UMinus		of expr
@@ -54,6 +73,7 @@ type tree =
 	| Plus			of expr * expr
 	| Minus			of expr * expr
 	| Times			of expr * expr
+	| Divide		of expr * expr
 	(* Comparison operators (int -> int -> bool) *)
 	| Equal			of expr * expr
 	| NotEqual		of expr * expr
@@ -67,9 +87,9 @@ and expr = {
 	range: range;	(* Where the expression is located in the source *)
 }
 
-(* EnvMap
-   A map object that associates strings to, in our case, values *)
-module EnvMap = Map.Make(String)
+(* StringMap
+   A map object that associates strings to, here, values or type names *)
+module StringMap = Map.Make(String)
 
 (* StringSet
    Well, a set of strings *)
@@ -80,13 +100,44 @@ module StringSet = Set.Make(String)
    booleans are required to run fouine; I added unit so that the if/then
    statement without else could be typed without error. *)
 type value =
+	(* Literal values *)
 	| Int of int
 	| Bool of bool
 	| Unit
-	(* Functions retain their binding and body expression node. This type is
-	   curried by essence *)
-	| Closure of env * pattern * expr
+	(* See "memory.ml" for reference implementation *)
+	| Reference of memory_addr
+	(* Tuples *)
+	| Tuple of value list
+	(* Constructor of an ADT *)
+	| Ctor of string * value
+	(* Functions retain a closure (not a full environment, see below), the name
+	   which is recursively bound to the function (or None), their argument and
+	   their body. See "eval.ml" for recursion details *)
+	| Closure of value StringMap.t * string option * pattern * expr
+	(* A placeholder captured as a free variable by recursive functions
+	   mentioning themselves (this avoids name errors). I could do type
+	   inference for recursive functions by inferring the most general type for
+	   this placeholder and unifying it with the type of the body *)
+	| Recursive
 
 (* env
-   As you'd expect - names mapped to values. *)
-and env = value EnvMap.t
+   A set of name -> value mappings, as well as a set of name -> type mappings
+   for Algebraic Data Types. *)
+and env = {
+	vars: value StringMap.t;
+	types: string StringMap.t;
+}
+
+(* memory
+   A storage for references. I hoped to make "memory" a type of OCaml-shared
+   mutable values. Sharing is not a problem (ADTs like "value" are OK) but the
+   mutable requirement only leaves records:
+     type memory_element = { mutable data: value; }
+   Since this is a reference, and references are not allowed, I'll be using a
+   brutal hash table instead. Not an array because of size extensions, but
+   that's the idea *)
+and memory = (memory_addr, value) Hashtbl.t
+
+(* memory_addr
+   THe type of memory addresses. I wanted to keep it opaque *)
+and memory_addr = int

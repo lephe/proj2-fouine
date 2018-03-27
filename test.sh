@@ -3,7 +3,11 @@
 # Parsing tests
 tests_parsing="toplevel"
 # Output tests
-tests_output="calc func let"
+tests_output="calc let func rec ref tuple"
+# Zero tests
+tests_zero="adt"
+# Exceptions tests
+tests_except="except"
 
 # Performed tests
 performed=0
@@ -12,8 +16,11 @@ passed=0
 
 r="\e[31;1m"
 g="\e[32;1m"
-b="\e[0m\e[35;1m"
+y="\e[33;1m"
+b="\e[34;1m"
+p="\e[35;1m"
 w="\e[0m"
+W="\e[0m\e[1m"
 
 prelude="tests/prelude.ml"
 
@@ -42,12 +49,17 @@ function show_input()
 	fi
 }
 
+# Check that fouine output is the same as OCaml
 function compare()
 {
 	out_ocaml=$(cat "$prelude" "$1" | ocaml -stdin)
-	out_fouine=$(bin/fouine "$fopt" "$1")
+	ret_ocaml="$?"
 
-	if [[ $out_ocaml == $out_fouine ]]; then
+	out_fouine=$(bin/fouine "$fopt" "$1")
+	ret_fouine="$?"
+
+	if [[ $out_ocaml == $out_fouine && $ret_ocaml == 0
+		&& $ret_fouine == 0 ]]; then
 		echo -e "${g}●${w} $1"
 		return 1
 	fi
@@ -61,6 +73,7 @@ function compare()
 	return 0
 }
 
+# Check that the source parses in fouine as in OCaml
 function parse()
 {
 	cat "$prelude" "$1" | ocaml -stdin 1> /dev/null 2>&1
@@ -86,21 +99,87 @@ function parse()
 	return 0
 }
 
-# Parsing tests
-echo -e "\n${b}PARSING TESTS${w} - check the return status of the parser\n"
+# Check that output is zero (when code cannot be executed by OCaml
+function zero()
+{
+	out=$(bin/fouine "$fopt" "$1")
+	ret="$?"
 
+	if [[ $ret != 0 ]]; then
+		echo -e "${r}●${w} $1"
+		echo "An exception occurred!"
+		show_input "$1"
+		return 0
+	fi
+
+	if [[ $out != 0 ]]; then
+		echo -e "${r}●${w} $1"
+		echo "Fouine did not print 0."
+		show_input "$1"
+		return 0
+	fi
+
+	echo -e "${g}●${w} $1"
+	return 1
+}
+
+# Check that exceptions are detected and reported
+function except()
+{
+	# Check that the file parses, but fails *at runtime*
+	bin/fouine -parse "$fopt" "$1" >/dev/null 2>&1
+	ret="$?"
+
+	if [[ $ret != 0 ]]; then
+		echo -e "${r}●${w} $1"
+		echo "Failed during parsing."
+		show_input "$1"
+		return 0
+	fi
+
+	stderr=$( (bin/fouine "$fopt" "$1" 3>&2 2>&1 1>&3-) 2> /dev/null )
+	ret="$?"
+
+	# Check that the return status is nonzero AND stderr is not empty
+	if [[ $ret != 0 && $stderr ]]; then
+		echo -e "${g}●${w} $1"
+		return 1
+	fi
+
+	echo -e "${r}●${w} $1"
+	[[ $ret == 0 ]] && echo "Fouine returned 0."
+	[[ ! $stderr ]] && echo "Fouine did not emit a diagnostic on stderr."
+	show_input "$1"
+	echo ""
+
+	return 0
+}
+
+echo -e "${W}"
+echo -e "Automated test types:"
+echo -e "  ${y}PARSING${W}    - Fouine should parse iff OCaml does"
+echo -e "  ${b}OCAML${W}      - Compare Fouine output with that of OCaml"
+echo -e "  ${p}ZERO${W}       - Fouine should succeed and print 0"
+echo -e "  ${r}EXCEPTIONS${W} - Fouine should catch an exception and fail"
+echo -e ""
+echo -e "Unit tests are divided into folders; each folder focuses on a"
+echo -e "specific language feature."
+echo -e "${w}"
+
+# Parsing tests
 for folder in $tests_parsing; do
+	echo -e "${y}PARSING: $folder${w}"
 	for file in tests/$folder/*; do
 		parse "$file"
 		performed=$(($performed + 1))
 		passed=$(($passed + 1 - $?))
 	done
+	echo ""
 done
 
 # Output tests
-echo -e "\n${b}OUTPUT TESTS${w} - compare the results of execution\n"
-
 for folder in $tests_output; do
+	echo -e "${b}OCAML: $folder${w}"
 	for file in tests/$folder/*; do
 		compare "$file"
 		performed=$(($performed + 1))
@@ -109,6 +188,28 @@ for folder in $tests_output; do
 	echo ""
 done
 
+# Zero tests
+for folder in $tests_zero; do
+	echo -e "${p}ZERO: $folder${w}"
+	for file in tests/$folder/*; do
+		zero "$file"
+		performed=$(($performed + 1))
+		passed=$(($passed + 1 - $?))
+	done
+	echo ""
+done
+
+# Exception tests
+for folder in $tests_except; do
+	echo -e "${r}EXCEPTIONS: $folder${w}"
+	for file in tests/$folder/*; do
+		except "$file"
+		performed=$(($performed + 1))
+		passed=$(($passed + 1 - $?))
+	done
+	echo ""
+done
+
 # Okay!
+echo "Done! Passed $passed/$performed tests."
 [[ $passed != $performed ]] && exit 1 || exit 0
-# echo -e "\nDone! Passed $passed/$performed tests."

@@ -12,11 +12,28 @@ open Pattern
 *)
 
 (* expr_free [expr -> StringSet.t]
-   Returns the set of all free variables of the given expression *)
-let rec expr_free exp = match exp.tree with
-	(* Bases cases *)
-	| LiteralInt _ | LiteralBool _ | LiteralUnit -> StringSet.empty
-	| Name n -> StringSet.of_list [ n ]
+   Returns the set of all free variables in the given expression *)
+let rec expr_free exp =
+	match exp.tree with
+
+	(* Bases cases with one or no free variable *)
+	| LiteralInt _ | LiteralBool _ | LiteralUnit | TypeDecl _ ->
+		StringSet.empty
+	| Name n ->
+		StringSet.of_list [ n ]
+
+	(* Trivial recursion - ADTs and unary "operators" *)
+	| ExprCtor (_, e) | Ref e | Bang e | UPlus e | UMinus e ->
+		expr_free e
+
+	(* Union of two recursive sets *)
+	| Plus (e, f) | Minus (e, f) | Times (e, f) | Divide (e, f)
+	| Equal (e, f) | NotEqual (e, f) | Greater (e, f)
+	| GreaterEqual (e, f) | Lower (e, f) | LowerEqual (e, f)
+	| Call (e, f)
+	| Assign (e, f) ->
+		StringSet.union (expr_free e) (expr_free f)
+
 	(* Compound expressions *)
 	| If (e, t, f) ->
 		StringSet.union (expr_free e)
@@ -24,28 +41,18 @@ let rec expr_free exp = match exp.tree with
 	| Let (_, pat, e, f) ->
 		let un = StringSet.union (expr_free e) (expr_free f)
 		in StringSet.diff un (pattern_free pat)
+
+	(* Functions *)
 	| Function (pat, e) ->
 		StringSet.diff (expr_free e) (pattern_free pat)
-	| Call (f, a) ->
-		StringSet.union (expr_free f) (expr_free a)
-	(* Boring operators *)
-	| UPlus e
-	| UMinus e
-		-> expr_free e
-	| Plus			(e, f)
-	| Minus			(e, f)
-	| Times			(e, f)
-	| Equal			(e, f)
-	| NotEqual		(e, f)
-	| Greater		(e, f)
-	| GreaterEqual	(e, f)
-	| Lower			(e, f)
-	| LowerEqual	(e, f)
-		-> StringSet.union (expr_free e) (expr_free f)
+
+	(* Tuples *)
+	| ExprTuple l ->
+		List.fold_left StringSet.union StringSet.empty (List.map expr_free l)
 
 (* expr_print [int -> expr -> unit]
    Display the syntax tree of an expression on stdout, indenting each line with
-   the provided level of indent. This function expects to be called at the
+   the provided level of indent. This function assumes that it's called at the
    beginning of a line, and prints a final newline *)
 let rec expr_print indent exp =
 
@@ -65,6 +72,12 @@ let rec expr_print indent exp =
 	| LiteralUnit   -> print_string "()\n"
 	| Name n		-> Printf.printf "{%s}\n" n
 
+	| TypeDecl (name, ctors, e) ->
+		Printf.printf "type %s" name;
+		List.iter (fun c -> space (); print_string ("  " ^ c ^ "\n")) ctors;
+		expr_print indent e;
+	| ExprCtor (ctor, e) -> recurse ctor [e]
+
 	| Let (recursive, pat, e, f) ->
 		let key = if recursive then "let rec " else "let " in
 		recurse (key ^ pattern_str pat ^ " = ") [e; f]
@@ -77,12 +90,19 @@ let rec expr_print indent exp =
 		recurse ("fun " ^ pattern_str pat ^ " ->") [e]
 	| Call (f, v) -> recurse "call" [f; v]
 
+	| Bang e		-> recurse "!" [e]
+	| Ref e 		-> recurse "ref" [e]
+	| Assign (e, f)	-> recurse ":=" [e; f]
+
+	| ExprTuple l	-> recurse "tuple" l
+
 	| UPlus  e -> recurse "+/1" [e]
 	| UMinus e -> recurse "-/1" [e]
 
 	| Plus			(e, f) -> recurse "+" [e; f]
 	| Minus			(e, f) -> recurse "-" [e; f]
 	| Times			(e, f) -> recurse "*" [e; f]
+	| Divide		(e, f) -> recurse "/" [e; f]
 
 	| Equal			(e, f) -> recurse "="  [e; f]
 	| NotEqual		(e, f) -> recurse "<>" [e; f]
@@ -91,8 +111,7 @@ let rec expr_print indent exp =
 	| Lower			(e, f) -> recurse "<"  [e; f]
 	| LowerEqual	(e, f) -> recurse "<=" [e; f]
 
-
-(* expr_source2 [int -> expr -> unit] [private function]
+(* expr_source2 [int -> expr -> unit] [private]
    Produce a human-readable listing of an expression
    TODO: Avoid some parentheses by performing priority analysis *)
 let rec expr_source2 level exp =
@@ -115,6 +134,13 @@ let rec expr_source2 level exp =
 	| LiteralBool b	-> print_string (if b then "true" else "false")
 	| LiteralUnit	-> print_string "()"
 	| Name n		-> print_string n
+
+	| TypeDecl (name, ctors, e) ->
+		Printf.printf "type %s = %s\n" name (String.concat " | " ctors);
+		expr_source2 level e
+	| ExprCtor (ctor, e) ->
+		Printf.printf "%s " ctor;
+		expr_source2 level e
 
 	(* Composed expressions. For lets, only increase indent when there are
 	   parameters (ie. function definition vs variable binding) *)
@@ -152,6 +178,25 @@ let rec expr_source2 level exp =
 		expr_source2 level arg;
 		print_string ")"
 
+	(* Reference-related *)
+	| Bang e ->
+		print_string "!";
+		expr_source2 level e
+	| Ref arg ->
+		print_string "ref (";
+		expr_source2 level arg;
+		print_string ")"
+	| Assign (e, f) -> binary ":=" e f
+
+	(* Tuples - normally no tuple should be empty... *)
+	| ExprTuple [] ->
+		print_string "<empty tuple?>"
+	| ExprTuple (hd :: tl) ->
+		print_string "(";
+		expr_source2 level hd;
+		List.iter (fun x -> print_string ","; expr_source2 level x) tl;
+		print_string ")"
+
 	(* Unary arithmetic operators *)
 	| UPlus e ->
 		print_string "+";
@@ -161,9 +206,10 @@ let rec expr_source2 level exp =
 		expr_source2 level e
 
 	(* Binary arithmetic operators *)
-	| Plus (e, f)  -> binary "+" e f
-	| Minus (e, f) -> binary "-" e f
-	| Times (e, f) -> binary "*" e f
+	| Plus		(e, f) -> binary "+" e f
+	| Minus		(e, f) -> binary "-" e f
+	| Times		(e, f) -> binary "*" e f
+	| Divide	(e, f) -> binary "/" e f
 
 	(* Comparison operators *)
 	| Equal			(e, f) -> binary "="  e f
@@ -173,8 +219,9 @@ let rec expr_source2 level exp =
 	| Lower			(e, f) -> binary "<"  e f
 	| LowerEqual	(e, f) -> binary "<=" e f
 
+
 (* expr_source [int -> exp -> unit]
-   Produce a human-readable listing of a provided expression *)
+   Prints a human-readable listing of a provided expression on stdout *)
 let expr_source level exp =
 	expr_source2 level exp;
 	print_newline ()

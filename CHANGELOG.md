@@ -70,3 +70,36 @@ envoyé).
 
 * Ajouté à l'interpréteur le support de `let` via le module *Pattern*. Ajouté
   la construction des clôtures et les appels de fonctions (non récursives).
+
+*[master 659955c]*
+	Substantial parsing, automated tests, record-based expressions, let
+	bindings and function calls.
+
+---
+
+* Implémenté les fonctions récursives, malgré l'impossibilité de les ajouter à
+  leur clôture. Un booléen dans le constructeur Closure s'en charge. Ajouté des
+  tests pour ces fonctions.
+
+* Ajouté au parser de quoi traiter les aspects impératifs du langage: "!", ";",
+  ":=", "ref". Le type unit était déjà présent donc pas de souci. "ref" est un
+  mot clé, pas une fonction, mais pourrait être un builin comme prInt.
+
+* Imlémenté un module *Memory* pour la gestion de la mémoire impérative, en
+  utilisant innocement une table de hachage sur des entiers. Implémenté "ref",
+  "!" et ":=". ";" est traduit comme un "let _ = .. in .." pour la simplicité.
+
+* Ajouté d'autres tests de fonctions récursives, des tests pour les
+  fonctionnalités impératives, et des tests pour vérifier que les erreurs sont
+  bien détectées.
+
+* Réimplementé range_highlight pour afficher la source faultive en cas
+  d'erreur (seulement si le script vient d'un fichier). On pourrait améliorer
+  en stockant toute la source dans un objet Bytes avant de lexer, mais on
+  perdrait l'aspect online.
+
+* Implémenté le parsing des couples avec un trick de priorité, et leur gestion
+  en général. Ajouté des tests sur le sujet.
+
+* Ajouté la déclaration des types algébriques et leur utilisation dans les
+  patterns de let. Pas de match pour l'instant.

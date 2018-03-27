@@ -1,3 +1,5 @@
+(* Parsing ambiguity with unary minus has to be resolved in favor of the
+   arithmetic operation, not the function call *)
 let n = 2
 let f x = x + 1
 let g x = x * 2;;

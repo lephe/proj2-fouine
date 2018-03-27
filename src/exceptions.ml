@@ -4,8 +4,22 @@
 
 open Types
 
-(* TODO: Add a type for syntax errors and try to highlight the corresponding
-   location in the file *)
+(* TODO: Try to detect parse errors, and show the location in the terminal *)
+exception ParseError
+
+(* MatchError - Occurs when patterns don't match value, when a recursive value
+   is requested, or when patterns and arguments are mixed...
+   @arg [range]		File range of the let-binding that uses the invalid pattern
+   @arg [pattern]	The pattern that could not be matched against
+   @arg [value]		The unexpected value *)
+exception MatchError of range * pattern * value
+
+(* MultiBind - Some variables are bound several times in the same pattern, or
+   the same type name is defined twice
+   @arg [bool]		Whether this is a type definition
+   @arg [range]		Range of expression that uses the pattern/type declaration
+   @arg [StringSet.t] List of duplicate variables *)
+exception MultiBind of bool * range * StringSet.t
 
 (* TypeError - Occurs during evaluation if an operator or a statement is used
    with the wrong kind of object
@@ -25,6 +39,18 @@ exception NameError of range * string
    and could cause parsing misunderstandings, such as "--"
    @arg [string]	Faulty operator name *)
 exception InvalidOperator of string
+
+(* ZeroDivision - Exactly what you think it is!
+   @arg [range]		Operand that evaluated to zero *)
+exception ZeroDivision of range
+
+(* TypeOverload - A single constructor is declared twice *)
+exception TypeOverload of range * string
+
+(* Error - A generic error (fallback)
+   @arg [range]		Location of the problem, may be range_empty
+   @arg [string]	A textual description of the error *)
+exception Error of range * string
 
 (* InternalError - When the interpreter screwed up, and I'm technically
    responsible for it (assertions and pattern matching)
