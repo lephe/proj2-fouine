@@ -2,6 +2,15 @@
 **	Parser - A Menhir-generated LR(1) parser for the fouine language
 *)
 
+(* This is an m4 file. See menhir.sh for the details of how it is preprocessed
+   before being passed to Menhir.
+   Each time a production is reduced, "($startpos, $endpos)" captures the
+   location in the source where the reduced tokens are located. I use it a lot
+   to be able to highlight the source code when errors happen.
+   At some point this string started to appear everywhere and made the file a
+   lot less readable, so I decided to use a bit of preprocessing magic *)
+define(POS,($startpos, $endpos))
+
 %{
 open Types
 open Util
@@ -9,97 +18,71 @@ open Exceptions
 
 (* The syntax tree will just be an expression *)
 type ast = expr
-(* Unstructured toplevel declarations *)
-type toplevel =
-	| Let of range * bool * pattern * pattern list * expr
-	| Type of range * string * string list
 
 (*
 **	Node construction functions
 **	The following functions build the nodes of the tree. Some take a range
 **	object as parameter; it is omitted only when it can be deduced from the
 **	parameter metadata (ie, when both the first and the last token of the
-**	rule are already of the type ast).
+**	rule are already ast).
+**
+**  The % operator is used below to affix trees with ranges, making expressions
+**  (see "types.ml" for details). I often write "r% tree" or "POS% tree" to
+**  keep the syntax light.
 *)
 
-(* Make integer nodes [range -> int -> ast] *)
-let make_int  r i : ast = { range = r; tree = LiteralInt i }
+let (%) range tree = { range = range; tree = tree }
 
-(* Make more fuuun o/ (this function curries function definitions) *)
+(* Make "fun args... ->" nodes by currying *)
 let rec make_fun r args e : ast = match args with
 	| [] -> e
-	| arg :: tl -> { range = r; tree = Function (arg, make_fun r tl e) }
+	| arg :: tl -> r% Function (arg, make_fun r tl e)
 
-(* Make let-value nodes [range -> pattern -> ast -> ast -> ast] *)
-let make_letv r pat e f : ast =
-	{ range = r; tree = Let (false, pat, e, f) }
-
-(* Make let-function nodes
-   [range -> bool -> pattern -> pattern list -> ast -> ast -> ast]
-   The first pattern is expected to be "Identifier name" (if not, a type error
-   will be raised at runtime when matching the function with the pattern) *)
-let make_letf r recursive pat args e f : ast =
-	(* For functions the let-binding must be a single name *)
-	{ range = r; tree = Let (recursive, pat, make_fun r args e, f) }
-
-(* Make if-then-else nodes *)
-let make_ifte r e t fo : ast =
-	(* Set a default condition, unit, for the else if none is specified *)
-	let f = match fo with
-	| Some f -> f
-	| None -> { range = (snd r, snd r); tree = LiteralUnit }
-	in { range = r; tree = If(e, t, f) }
+(* Make if-then nodes [range -> expr -> expr -> ast] *)
+let make_ifthen r e t : ast =
+	(* Set a default condition, unit, for the else clause *)
+	let else_clause = (snd r, snd r) % E_Unit
+	in r% If (e, t, else_clause)
 
 (* Make unary operator nodes [range -> string -> ast -> ast] *)
 let make_unary r0 op e1 : ast =
 	let r = range_merge r0 e1.range in
-	match op with
-	| "+" -> { range = r; tree = UPlus e1 }
-	| "-" -> { range = r; tree = UMinus e1 }
-	| "!" -> { range = r; tree = Bang e1 }
+	r% match op with
+	| "+" -> UPlus e1
+	| "-" -> UMinus e1
+	| "!" -> Bang e1
 	| _ -> raise (InternalError
 		("The parser suddenly forgot what " ^ op ^ " means x_x\n"))
 
 (* Make binary operator nodes [ast -> string -> ast -> ast] *)
 let make_binary e1 op e2 : ast =
 	let r = range_merge e1.range e2.range in
-	match op with
-	| "+"  -> { range = r; tree = Plus			(e1, e2) }
-	| "-"  -> { range = r; tree = Minus			(e1, e2) }
-	| "*"  -> { range = r; tree = Times			(e1, e2) }
-	| "/"  -> { range = r; tree = Divide		(e1, e2) }
-	| "="  -> { range = r; tree = Equal			(e1, e2) }
-	| "<>" -> { range = r; tree = NotEqual		(e1, e2) }
-	| ">"  -> { range = r; tree = Greater		(e1, e2) }
-	| ">=" -> { range = r; tree = GreaterEqual	(e1, e2) }
-	| "<"  -> { range = r; tree = Lower			(e1, e2) }
-	| "<=" -> { range = r; tree = LowerEqual	(e1, e2) }
+	r% match op with
+	| "+"  -> Plus			(e1, e2)
+	| "-"  -> Minus			(e1, e2)
+	| "*"  -> Times			(e1, e2)
+	| "/"  -> Divide		(e1, e2)
+	| "="  -> Equal			(e1, e2)
+	| "<>" -> NotEqual		(e1, e2)
+	| ">"  -> Greater		(e1, e2)
+	| ">=" -> GreaterEqual	(e1, e2)
+	| "<"  -> Lower			(e1, e2)
+	| "<=" -> LowerEqual	(e1, e2)
 	| _ -> raise (InternalError
 		("The parser suddenly forgot what " ^ op ^ " means x_x\n"))
 
-(* Make programs out of unstructured let lists [toplevel list -> ast] *)
-let rec make_toplevel (decls: toplevel list) final : ast =
-	match decls with
-	| [] -> final
-	| Let (r, recursive, pat, args, e) :: tail ->
-		let f = make_toplevel tail final in
-		if args = []
-			then make_letv r pat e f
-			else make_letf r recursive pat args e f
-	| Type (r, name, ctors) :: tail ->
-		let f = make_toplevel tail final in
-		{ range = r; tree = TypeDecl (name, ctors, f) }
-
 (* An empty list [range -> ast] *)
 let make_list_empty r : ast =
-	let (b, _) = r in
-	let nothing = { range = (b, b); tree = LiteralUnit } in
-	{ range = r; tree = ExprCtor ("Empty", nothing) }
+	let nothing = (fst r, fst r) % E_Unit in
+	r% E_Ctor ("Empty", nothing)
 
 (* A list constructor [range -> expr -> expr -> ast] *)
 let make_list_cons r hd tl : ast =
-	let pair = { range = r; tree = ExprTuple [hd; tl] } in
-	{ range = r; tree = ExprCtor ("Cons", pair) }
+	r% E_Ctor ("Cons", r% E_Tuple [hd; tl])
+
+(* A list with a single element [range -> expr -> ast] *)
+let make_list_one r e : ast =
+	make_list_cons r e (make_list_empty r)
 
 %}
 
@@ -116,13 +99,13 @@ let make_list_cons r hd tl : ast =
 /* Punctuation */
 %token LPAR RPAR SEMI SEMISEMI
 %token ARROW UND ASSIGN BANG COMMA PIPE
-%token LBRACKET RBRACKET CONS
+%token LBRACK RBRACK CONS
 
 /* Operators */
 %token PLUS MINUS TIMES DIV
 %token GT GE LT LE EQ NE
 
-/* Token for unknown constructs that resemble (user-defined) operators */
+/* Unknown constructs that resemble (user-defined) operators */
 %token <string> OPERATOR
 
 /* Keywords */
@@ -137,47 +120,62 @@ let make_list_cons r hd tl : ast =
 %token EOF
 
 /*
-**	Precedence relations (mainly reproducing those of OCaml)
+**	Precedence relations
+**  We all know that %prec's are tricky and I've tried to keep them minimal. I
+**  I consider them acceptable where the OCaml parser uses them, and I document
+**  why I need them. Otherwise, there's an entry in my doc/bugs file.
 */
 
-/* Semicolon, for instruction sequences */
+/* [below_SEMI] Used to make seq_expr greedy */
 %nonassoc below_SEMI
 %right SEMI
+
 /* THEN has to be strictly below ELSE, otherwise the "if..then" rule would
    always be reduced regardless of whether there is an "else" clause */
 %nonassoc THEN
 %nonassoc ELSE
-/* Testing reveals that assignment is around here */
+
 %right ASSIGN
-/* This precedence, among with WITH, solves conflicts in match cases */
+
+/* [below_PIPE] Used to make match_cases greedy (for nested matches). Can
+   probably be avoided (TODO) */
 %nonassoc below_PIPE
 %left PIPE
-/* Comma is non-associative because a, b, c != (a, b), c != a, (b, c)! */
+
+/* [below_COMMA] Makes the tuple rule greedy (again) */
 %nonassoc below_COMMA
 %left COMMA
+
 /* ARROW has a low priority so that fun x -> x + 2 means fun x -> (x + 2) */
 %right ARROW
+
 /* OCaml says that EQ, GT and LT have the same priority, but I have found
    nothing in the parser about NE, GE and LE. A bit of experimentation
    suggested that they all have the same precedence level */
 %left EQ NE GT GE LT LE
-/* List constructors */
+
 %right CONS
+
 /* Usual arithmetic operations, and unknown (user-defined) operators */
 %left PLUS MINUS OPERATOR
 %left TIMES DIV
-/* ThesE are not true tokens, just dummy symbols used within %prec rules */
+
+/* [prec_UPLUS] [prec_UMINUS] Just because the same symbol is used for two
+   operators with different priorities */
 %left prec_UPLUS prec_UMINUS
-/* As in the original OCaml parser, the tokens that introduce simple
-   expressions have the highest priority, so that we always shift them. This
-   happens especially in cases like "MINUS NAME . INT" where we want to shift
-   the integer to reduce the function call before reducing the unary minus */
-%nonassoc BEGIN INT BOOL NAME LPAR BANG LBRACKET
+
+/* Tokens that introduce simple, "atomic" expressions have the highest
+   priority because we don't want to break down an atomic expression. This
+   makes like "-f . 3" work because we want to shift 3 before reducing -f */
+%nonassoc BEGIN INT BOOL NAME LPAR BANG LBRACK
 
 /* Our CST will be annotated with line and column numbers */
-%start <Types.expr> toplevel
-/* Give some types to improve error messages from type inference */
-%type <toplevel> toplevel_decl
+%start <Types.decl list> toplevel
+/* The REPL shell mainly reads toplevel commands terminated by ";;" */
+%start <Types.decl list> repl
+
+/* The types help improve error messages from type inference */
+%type <Types.decl> toplevel_decl
 %type <Types.expr> expr_list
 
 %%
@@ -187,174 +185,157 @@ let make_list_cons r hd tl : ast =
 */
 
 toplevel:
-	/* Specification says that in the absence of a final expression, 0 is
-	   used in place */
-	| SEMISEMI EOF | EOF { make_int ($startpos, $endpos) 0 }
-	| e = seq_expr EOF { e }
+	| SEMISEMI EOF | EOF				{ [] }
+	| e = seq_expr EOF					{ [D_Expr (POS, e)] }
 
-	/* The following rules allow the use of ";;" and omitting the "in" at
-	   the root of the source tree (following Ocaml syntax) */
-	| seq = toplevel_seq SEMISEMI p = toplevel
-		{ make_toplevel seq p }
+	/* Allow using ";;" and omitting the "in" at the toplevel (OCaml syntax) */
+	| seq = toplevel_seq SEMISEMI p = toplevel { seq @ p }
+	| seq = toplevel_seq EOF { seq }
 
-	/* Omitting even the ";;" is allowed if there is no final expression */
-	| seq = toplevel_seq EOF
-		{ make_toplevel seq (make_int ($endpos, $endpos) 0) }
-
-	/* The following rule allows writing bare expressions before a ";;". The
-	   string "expr;;" resolves to "let _ = expr;;" */
+	/* Expressions before ";;" resolve to "let _ = expr;;" */
 	| e = seq_expr SEMISEMI p = toplevel
-		{ make_toplevel [ Let (e.range, false, Wildcard, [], e) ]  p }
+		{ D_LetVal (e.range, P_Wildcard, e) :: p }
 
 toplevel_seq:
-	/* I had to use Menhir's standard lists at least once */
-	| seq = nonempty_list(toplevel_decl) { seq }
+	| s = nonempty_list(toplevel_decl)	{ s }
 
+/* Toplevel declarations include let bindings and type definitions */
 toplevel_decl:
-	/* Two flavours of let bindings - see expr for more detail */
+	/* Two flavours of let; see "expr" for more detail */
 	| LET recursive = boption(REC) pat = pattern EQ e = expr
-		{ Let (($startpos, $endpos), false, pat, [], e) }
+		{ D_LetVal (POS, pat, e) }
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
-	  e = expr
-		{ Let (($startpos, $endpos), recursive, Identifier n, args, e) }
-	/* Type declarations are only found at the toplevel */
+	  e = expr {
+		if not recursive
+		then D_LetVal (POS, P_Name n, make_fun POS args e)
+		else D_LetRec (POS, n, make_fun POS args e)
+	  }
+	/* OCaml-style type declarations (but not compatible with typing) */
 	| TYPE n = NAME EQ option(PIPE) hd = CTOR l = list(PIPE c = CTOR { c })
-		{ Type (($startpos, $endpos), n, hd :: l) }
+		{ D_Type (POS, n, hd :: l) }
+
+/* The input of the REPL shell */
+repl:
+	| repl_terminator { [] }
+	| e = seq_expr repl_terminator { [D_Expr (POS, e)] }
+	| s = toplevel_seq repl_terminator { s }
+
+/* REPL command terminators */
+repl_terminator:
+	| EOF { print_newline () }
+	| SEMISEMI { }
 
 /*
 **  General expressions
 */
 
+/* seq_expr is the largest expression nonterminal, the only that allows ";" */
 seq_expr:
-	/* Make the rule greedy - see somewhere below */
-	| e = expr %prec below_SEMI { e }
-	| e = expr SEMI f = seq_expr
-		{ make_letv ($startpos, $endpos) Wildcard e f }
+	/* The precedence level below that of SEMI prevents the rule from being
+	   reduced as long as semicolons are available, making it "greedy" */
+	| e = expr %prec below_SEMI			{ e }
+	| e = expr SEMI f = seq_expr		{ POS% E_LetVal (P_Wildcard, e, f) }
 
 expr:
-	/* Simple expressions are literals and enclosed expressions - roughly the
+	/* Atomic expressions are literals and enclosed expressions - roughly the
 	   things that can be passed to the highest-priority operator, function
 	   application, without triggering a syntax error */
-	| se = simple_expr { se }
+	| ae = atomic_expr					{ ae }
 
 	/* Let bindings - come in two flavours:
 	     let <pattern> = <expr> in <expr>
-	     let [rec] <function-name> <pattern...> = <expr> in <expr>
-	   The productions actually allow rec to be used for value bindings, but it
-	   is ignored (for now). This avoids some ambiguities */
-	/* TODO: Handle rec for value bindings */
+	     let [rec] <function-name> <patterns...> = <expr> in <expr>
+	   Note that LetVal handles non-recursives function definitions as values;
+	   semantic differences only arise when using let rec */
 
-	/* Value bindings. Note that bound values are expressions, not just
-	   literals. They will be unified with the pattern at runtime */
-	| LET recursive = boption(REC) pat = pattern EQ e = seq_expr IN
-	  f = seq_expr
-		{ make_letv ($startpos, $endpos) pat e f }
+	| LET boption(REC) pat = pattern EQ
+	  e = seq_expr IN f = seq_expr		{ POS% E_LetVal (pat, e, f) }
 
-	/* Function bindings. The name must not be a pattern, thus the need for two
-	   productions. The argument list must not be empty to avoid conflicts with
-	   the previous production */
+	/* In function bindings, the we can only bind one name at a time */
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
-	  e = seq_expr IN f = seq_expr
-		{ make_letf ($startpos, $endpos) recursive (Identifier n) args e f }
+	  e = seq_expr IN f = seq_expr {
+		if not recursive
+		then POS% E_LetVal (P_Name n, make_fun POS args e, f)
+		else POS% E_LetRec (n, make_fun POS args e, f)
+	  }
 
 	/* Pattern matching */
-	| MATCH e = seq_expr WITH option(PIPE) ps = match_cases
-		{ { range = ($startpos, $endpos); tree = Match (e, ps) } }
+	| MATCH e = seq_expr WITH
+	  option(PIPE) mc = match_cases		{ POS% Match (e, mc) }
 
 	/* Reference assignments */
-	| e = expr ASSIGN f = expr
-		{ { range = range_merge e.range f.range; tree = Assign (e, f) } }
+	| e = expr ASSIGN f = expr			{ POS% Assign (e, f) }
 
-	/* Conditions
-	   Not any possibility of using Menhir's option() here (AFAIK) because the
-	   two rules have different prioritIes - ELSE being higher than THEN */
-	| IF e = seq_expr THEN t = expr ELSE f = expr
-		{ make_ifte ($startpos, $endpos) e t (Some f) }
+	/* Conditions - Can't use Menhir's option() here (AFAIK) because the two
+	   reductions must have a different priority */
 	| IF e = seq_expr THEN t = expr
-		{ make_ifte ($startpos, $endpos) e t None }
+	  ELSE f = expr						{ POS% If (e, t, f) }
+	| IF e = seq_expr THEN t = expr		{ make_ifthen POS e t }
 
-	/* Function applications */
-	| e = expr se = simple_expr
-		{ { range = range_merge e.range se.range; tree = Call (e, se) } }
-	/* "ref" is also a function call, priority-wise */
-	| REF se = simple_expr
-		{ { range = ($startpos, $endpos); tree = Ref se } }
-	/* And so are constructors */
-	| c = CTOR se = simple_expr
-		{ { range = ($startpos, $endpos); tree = ExprCtor (c, se) } }
+	/* Function applications, and, priority-wise, "ref" and constructors */
+	| e = expr	ae = atomic_expr 		{ POS% Call (e, ae) }
+	| REF		ae = atomic_expr 		{ POS% Ref ae }
+	| c = CTOR	ae = atomic_expr 		{ POS% E_Ctor (c, ae) }
 
 	/* Function definitions */
-	| FUN pl = nonempty_list(pattern) ARROW e = seq_expr
-		{ make_fun ($startpos, $endpos) pl e }
+	| FUN pl = nonempty_list(pattern)
+	  ARROW e = seq_expr				{ make_fun POS pl e }
 
 	/* Usual arithmetic operations */
-	| e = expr PLUS  f = expr	{ make_binary e "+" f }
-	| e = expr MINUS f = expr	{ make_binary e "-" f }
-	| e = expr TIMES f = expr	{ make_binary e "*" f }
-	| e = expr DIV   f = expr	{ make_binary e "/" f }
+	| e = expr PLUS  f = expr			{ make_binary e "+" f }
+	| e = expr MINUS f = expr			{ make_binary e "-" f }
+	| e = expr TIMES f = expr			{ make_binary e "*" f }
+	| e = expr DIV   f = expr			{ make_binary e "/" f }
 
 	/* User-defined operators - just complain!
 	   This rule exists to avoid "1+-2" being accepted by the parser */
-	| e = expr op = OPERATOR f = expr
-		{ raise (InvalidOperator op) }
+	| e = expr op = OPERATOR f = expr	{ raise (InvalidOperator op) }
 
 	/* Comparisons */
-	| e = expr EQ f = expr		{ make_binary e "="  f }
-	| e = expr NE f = expr		{ make_binary e "<>" f }
-	| e = expr GT f = expr		{ make_binary e ">"  f }
-	| e = expr GE f = expr		{ make_binary e ">=" f }
-	| e = expr LT f = expr		{ make_binary e "<"  f }
-	| e = expr LE f = expr		{ make_binary e "<=" f }
+	| e = expr EQ f = expr				{ make_binary e "="  f }
+	| e = expr NE f = expr				{ make_binary e "<>" f }
+	| e = expr GT f = expr				{ make_binary e ">"  f }
+	| e = expr GE f = expr				{ make_binary e ">=" f }
+	| e = expr LT f = expr				{ make_binary e "<"  f }
+	| e = expr LE f = expr				{ make_binary e "<=" f }
 
 	/* List const */
-	| e = expr CONS f = expr
-		{ make_list_cons ($startpos, $endpos) e f }
+	| e = expr CONS f = expr			{ make_list_cons POS e f }
 
 	/* Rule with special precedence: unary plus and unary minus */
-	| PLUS  e = expr %prec prec_UPLUS
-		{ make_unary ($startpos, $endpos) "+" e }
-	| MINUS e = expr %prec prec_UMINUS
-		{ make_unary ($startpos, $endpos) "-" e }
+	| PLUS  e = expr %prec prec_UPLUS	{ make_unary POS "+" e }
+	| MINUS e = expr %prec prec_UMINUS	{ make_unary POS "-" e }
 
-	/* A precedence below that of COMMA prevents this rule from being reduced
-	   as long as a comma is available as a lookahead, making it, in practice,
-	   greedy */
-	| ecl = expr_comma_list %prec below_COMMA
-		{ { range = ($startpos, $endpos); tree = ExprTuple (List.rev ecl) } }
+	/* Like expr_seq, this rule needs to be greedy to avoid ambiguities */
+	| ec = expr_comma %prec below_COMMA	{ POS% E_Tuple (List.rev ec) }
 
-expr_comma_list:
-	/* Aggregates, tuples, etc. I need to specify at least one element
-	   otherwise the list would have a production expr -> expr */
-	| e = expr COMMA f = expr { [f; e] }
-	| ecl = expr_comma_list COMMA g = expr { g :: ecl }
+/* Aggregates, tuples... one element must be specified, otherwise the list
+   would have a production expr -> expr */
+expr_comma:
+	| e = expr COMMA f = expr			{ [f; e] }
+	| ec = expr_comma COMMA g = expr	{ g :: ec }
 
-simple_expr:
+atomic_expr:
 	/* Literal integers or variable names, units */
-	| i = INT   { make_int  ($startpos, $endpos) i }
-	| b = BOOL  { { range = ($startpos, $endpos); tree = LiteralBool b } }
-	| n = NAME  { { range = ($startpos, $endpos); tree = Name n } }
-	| LPAR RPAR { { range = ($startpos, $endpos); tree = LiteralUnit } }
+	| i = INT  						 	{ POS% E_Int i }
+	| b = BOOL  						{ POS% E_Bool b }
+	| n = NAME  						{ POS% E_Name n }
+	| LPAR RPAR 						{ POS% E_Unit }
 
 	/* Expressions enclosed within parentheses or begin..end */
-	| LPAR e = expr RPAR
-	| BEGIN e = expr END
-		{ { range = e.range; tree = e.tree } }
+	| LPAR e = expr RPAR				{ e }
+	| BEGIN e = expr END				{ e }
 
 	/* Dereferencing */
-	| BANG se = simple_expr
-		{ make_unary ($startpos, $endpos) "!" se }
+	| BANG ae = atomic_expr				{ make_unary POS "!" ae }
 
 	/* Lists */
-	| LBRACKET e = expr_list RBRACKET { e }
+	| LBRACK e = expr_list RBRACK		{ e }
 
 expr_list:
-	| /* empty */
-		{ make_list_empty ($startpos, $endpos) }
-	| e = expr
-		{ let r = ($startpos, $endpos) in
-			make_list_cons r e (make_list_empty r) }
-	| e = expr SEMI l = expr_list
-		{ make_list_cons ($startpos, $endpos) e l }
+	| /* empty */						{ make_list_empty POS }
+	| e = expr							{ make_list_one POS e }
+	| e = expr SEMI l = expr_list		{ make_list_cons POS e l }
 
 /*
 **  Match cases, for functional pleasure
@@ -364,48 +345,49 @@ expr_list:
    it's not inline and it "hides" the rule precedence, which is that of PIPE */
 match_cases:
 	/* Same hack to make the rule greedy - I lack time do it 100% properly */
-	| c = match_case %prec below_PIPE { [ c ] }
-	| c = match_case PIPE cl = match_cases { c :: cl }
+	| c = match_case %prec below_PIPE	{ [ c ] }
+	| c = match_case PIPE
+	  mc = match_cases					{ c :: mc }
 
 match_case:
-	| p = pattern ARROW e = expr { (p, e) }
+	| p = pattern ARROW e = expr		{ (p, e) }
 
 /*
 **  Binding patterns for use by let expressions and function definitions
 */
 
 pattern:
-	/* Simple patterns - same "trick" as for expressions */
-	| sp = simple_pattern { sp }
+	| ap = atomic_pattern				{ ap }
 	/* ADT constructors */
-	| c = CTOR sp = simple_pattern { PatternCtor (c, sp) }
+	| c = CTOR ap = atomic_pattern		{ P_Ctor (c, ap) }
 	/* Tuples - same technique as the tuple expressions above */
-	| pcl = pattern_comma_list %prec below_COMMA { Product (List.rev pcl) }
+	| pcl = pattern_comma_list
+	  %prec below_COMMA					{ P_Tuple (List.rev pcl) }
 	/* List constructors, which is a binary operator */
-	| p = pattern CONS q = pattern { PatternCtor ("Cons", Product [p; q]) }
+	| p = pattern CONS q = pattern		{ P_Ctor ("Cons", P_Tuple [p;q]) }
 
-simple_pattern:
-	/* Basic patterns: variable names and the wildcard */
-	| n = NAME		{ Identifier n }
-	| UND			{ Wildcard }
-	/* Literal values (must match exacly) */
-	| i = INT		{ PatternInt i }
-	| b = BOOL		{ PatternBool b }
-	| LPAR RPAR		{ PatternUnit }
+atomic_pattern:
+	/* Variable names, wildcards, and literal values */
+	| n = NAME							{ P_Name n }
+	| UND								{ P_Wildcard }
+	| i = INT							{ P_Int i }
+	| b = BOOL							{ P_Bool b }
+	| LPAR RPAR							{ P_Unit }
 	/* Parentheses may also appear in patterns */
-	| LPAR p = pattern RPAR { p }
+	| LPAR p = pattern RPAR				{ p }
 	/* List patterns */
-	| LBRACKET p = pattern_list RBRACKET { p }
+	| LBRACK p = pattern_list RBRACK	{ p }
 
 pattern_list:
 	| /* empty */
-		{ PatternCtor ("Empty", PatternUnit) }
+		{ P_Ctor ("Empty", P_Unit) }
 	| p = pattern
-		{ let last = PatternCtor ("Empty", PatternUnit) in
-		  PatternCtor ("Cons", Product [p; last]) }
+		{ let last = P_Ctor ("Empty", P_Unit) in
+		  P_Ctor ("Cons", P_Tuple [p; last]) }
 	| p = pattern SEMI pl = pattern_list
-		{ PatternCtor ("Cons", Product [p; pl]) }
+		{ P_Ctor ("Cons", P_Tuple [p; pl]) }
 
 pattern_comma_list:
-	| p = pattern COMMA q = pattern { [q; p] }
-	| pcl = pattern_comma_list COMMA r = pattern { r :: pcl }
+	| p = pattern COMMA q = pattern		{ [q; p] }
+	| pcl = pattern_comma_list COMMA
+	  r = pattern						{ r :: pcl }

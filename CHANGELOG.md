@@ -5,7 +5,7 @@ commit. Le fichier se lit de haut en bas, et le numéro de commit est indiqué
 après chaque série de modifications (ajouté a posteriori une fois le commit
 envoyé).
 
----
+## Rendu 2
 
 * Créé un système de compilation manuel à base d'un Makefile et de Menhir...
   modifié a posteriori pour `ocamlbuild` à cause de l'ordre des dépendances du
@@ -136,3 +136,38 @@ envoyé).
   à un ADT `list = Empty | Const`. Implémenté de quoi les déconstruire joliment
   dans les match.
 
+*[master a3f322f]*
+	Rendu 2 is drawing *very* near.
+
+## Rendu 3
+
+* Séparé `let` en plusieurs parties. Syntaxiquement, on distingue let-variable
+  et let-fonction. Une fois le parser passé, on ne distique pus que let-valeur
+  (qui inclut les fonctions non récursives) et let-fonction-récursive.
+
+* Fait du parser un fichier m4 et travaillé à la lisibilité. Commencé à
+  préfixer les constructeurs pour éviter d'inventer des synonymes à tous bouts
+  de champ (pattern.Identifier, expr.Name -> pattern.P_Name, expr.E_Name).
+
+* Implémenté une variante de l'Algorithme W de Damas et Milner dans
+  `src/typing.ml`. Il supporte pour l'instant les opérateurs du λ-calcul et
+  imite OCaml pour la généralisation des variables de type (afin d'éviter les
+  paradoxes connus comme la référence polymorphe).
+
+  La version originale utilise des substitutions, mais ici j'exploite un
+  Union-Find pour grouper les variables de types qui représentent des monotypes
+  identiques. L'algorithme est sensiblement linéaire, mais je ne fais pas
+  encore les "occurs check", donc les types récursifs arbitraires sont
+  autorisés.
+
+* Commencé un shell interactif à l'aide des modules *Repl* et *Toplevel*. Un
+  programme n'est désormais plus une expression mais une suite de déclarations.
+  Le shell interactif affiche le résultat de leur exécution (c'est plus naturel
+  pour les définitions de types). Le shell démarre en mode interactif si aucun
+  nom de fichier n'est indiqué et que `-stdin` n'est pas utilisé.
+
+  Le shell utilise le fameux ";;" pour terminer les commandes. Il est
+  absolument nécessaire pour éviter les end-of-stream conflicts que Menhir
+  prend la peine de signaler. Le problème survient quand la fin des commandes
+  est décidée par le token suivant, qui n'existe pas en interactif (le lire
+  sur l'entrée standard bloque le processus).

@@ -24,6 +24,7 @@ Eval
 	value_type()		# Value type as string
 	value_str()		# Get textual representation (without newline)
 	value_print()		# Print value to stdout (with newline)
+
 	eval()			# Evaluate an expression
 
 Exceptions
@@ -35,6 +36,8 @@ Exceptions
 	TypeOverload		(range, string)
 	Error			(range, string)
 	InternalError		(string)
+
+	exception_report()	# Execute function and catch exceptions *)
 
 Expr
 	expr_free()		# Get the free variables
@@ -51,6 +54,14 @@ Pattern
 	pattern_free()		# Get bound variables
 	pattern_str()		# String representation of pattern
 	pattern_unify()		# Match pattern, unify terms, bind names
+
+Toplevel
+	top_new()		# Create a new toplevel environment
+	top_exec()		# Execute a single toplevel declaration
+
+	decl_print()		# Print declaration AST
+	decl_source()		# Print declaration source
+	decl_eval()		# Evaluate a single toplevel declaration
 
 Util
 	range_empty		# An empty range object (placeholder)

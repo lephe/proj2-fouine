@@ -9,24 +9,23 @@ open Exceptions
 (* pattern_free [pattern -> StringSet.t]
    Returns a list of all names bound by the pattern *)
 let rec pattern_free pat = match pat with
-	| Identifier i -> StringSet.singleton i
-	| Product l ->
+	| P_Name i		-> StringSet.singleton i
+	| P_Ctor (_, p)	-> pattern_free p
+	| P_Tuple l ->
 		let map = List.map pattern_free l in
 		List.fold_left StringSet.union StringSet.empty map
-	| PatternCtor (_, p) ->
-		pattern_free p
 	| _ -> StringSet.empty
 
 (* pattern_str [pattern -> string]
    Returns a textual representation of a pattern *)
 let rec pattern_str p = match p with
-	| Identifier i	-> i
-	| Wildcard		-> "_"
-	| PatternInt i	-> string_of_int i
-	| PatternBool b -> if b then "true" else "false"
-	| PatternUnit	-> "()"
-	| Product l		-> "(" ^ String.concat ", " (List.map pattern_str l) ^ ")"
-	| PatternCtor (ctor, p) -> ctor ^ " " ^ pattern_str p
+	| P_Name i		-> i
+	| P_Wildcard	-> "_"
+	| P_Int i		-> string_of_int i
+	| P_Bool b		-> if b then "true" else "false"
+	| P_Unit		-> "()"
+	| P_Tuple l		-> "(" ^ String.concat ", " (List.map pattern_str l) ^ ")"
+	| P_Ctor (c, p)	-> c ^ " " ^ pattern_str p
 
 (* pattern_dup [private]
    [pattern -> StringSet.t -> StringSet.t -> StringSet.t * StringSet.t]
@@ -36,12 +35,13 @@ let rec pattern_str p = match p with
    @arg  Duplicates already found
    @ret  The two last arguments, updated *)
 let rec pattern_dup pat found dups = match pat with
-	| Identifier i -> if StringSet.mem i found
+	| P_Name i ->
+		if StringSet.mem i found
 		then (found, StringSet.add i dups)
 		else (StringSet.add i found, dups)
-	| Product l ->
+	| P_Tuple l ->
 		List.fold_left (fun (x, y) p -> pattern_dup p x y) (found, dups) l
-	| PatternCtor (c, p) ->
+	| P_Ctor (c, p) ->
 		pattern_dup p found dups
 	| _ -> (found, dups)
 
@@ -60,22 +60,22 @@ let rec pattern_unify pat (v: value) =
 	match (pat, v) with
 
 	(* Wildcards and identifiers always match *)
-	| Wildcard, _ -> []
-	| Identifier i, _ -> [ (i, v) ]
+	| P_Wildcard, _ -> []
+	| P_Name i, _ -> [ (i, v) ]
 
 	(* Literal values must be equal *)
-	| PatternInt i, Int j when i = j -> []
-	| PatternBool b, Bool c	when ((b && c) || (not b && not c)) -> []
-	| PatternUnit, Unit -> []
+	| P_Int i,	V_Int j  when i = j -> []
+	| P_Bool b,	V_Bool c when ((b && c) || (not b && not c)) -> []
+	| P_Unit,	V_Unit -> []
 
 	(* Tuples is where is gets interesting - recursion kicks in! *)
-	| Product pl, Tuple vl ->
+	| P_Tuple pl, V_Tuple vl ->
 		if List.length pl <> List.length vl then fail() else
 		let l = List.combine pl vl in
 		List.concat (List.map (fun (x, y) -> pattern_unify x y) l)
 
 	(* Constructors are also a simple form of recursion for pattern matching *)
-	| PatternCtor (ctor, pat), Ctor (candidate, v) ->
+	| P_Ctor (ctor, pat), V_Ctor (candidate, v) ->
 		if ctor <> candidate then fail() else
 		pattern_unify pat v
 

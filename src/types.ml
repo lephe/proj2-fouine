@@ -1,37 +1,26 @@
 (*
 **	Types - This interpreter's main type definitions
 **
-**	The interpreter has many mutually-recursive types and sometimes having to
-**	define several types plus their interface functions in the same file did
-**	not feel like a very good idea, so I gathered the type definitions here and
-**	split the functions in other files.
+**	The interpreter has many mutually-recursive types. In order to split up
+**	interface functions in different modules, I gathered the type definitions
+**	in a separated file.
 *)
 
 (* range
    Pairs of Lexing.position objects that mark out expressions in the code. A
    single Lexing.position allows showing the line where the error happens; two
-   make it possible to highlight faulty expressions *)
+   make it possible to highlight faulty expressions. *)
 type range = Lexing.position * Lexing.position
 
-(* pattern
-   Pattern-matching expressions used by let bindings, match statements and
-   indirect bindings in function arguments *)
-type pattern =
-	| Identifier of string
-	(* Ignored binding "let _ = ..." or wildcard "_" *)
-	| Wildcard
-	(* Literal values, must match exactly. I can't really put a "value" here
-	   because patterns are more restricted and can (obviously) be used with
-	   types that support comparison; functions don't. *)
-	| PatternInt of int
-	| PatternBool of bool
-	| PatternUnit
-	(* Product types *)
-	| Product of pattern list
-	(* ADT constructors *)
-	| PatternCtor of string * pattern
+(* decl
+   Toplevel declarations *)
+type decl =
+	| D_Expr	of range * expr
+	| D_LetVal	of range * pattern * expr
+	| D_LetRec	of range * string * expr
+	| D_Type	of range * string * string list
 
-(* Expression types: tree, expr
+(* Expression types: expr_tree, expr
 
    This expression type is a simple variant of the ADT that supports
    annotations (additional data attached to every node). I originally
@@ -39,25 +28,26 @@ type pattern =
    settled for the record with fixed attributes, for simplicity.
 
    "expr" is the fully-qualified expression type that the interpreter
-   manipulates, and "tree" is the ADT where recursion happens. Making this
+   manipulates, and "expr_tree" is the ADT where recursion happens. Making this
    recursion mutual avoids having to put the annotations inside the
    constructors.
 *)
 
-type tree =
+and expr_tree =
 	(* Literal values and identifiers *)
-	| LiteralInt	of int
-	| LiteralBool	of bool
-	| LiteralUnit
-	| Name			of string
-	(* Type declarations, a kind of let type .. in .., with constructors *)
-	| TypeDecl		of string * string list * expr
-	| ExprCtor		of string * expr
+	| E_Int			of int
+	| E_Bool		of bool
+	| E_Unit
+	| E_Name		of string
+	(* Type constructors *)
+	| E_Ctor		of string * expr
 	(* Pattern matching *)
 	| Match			of expr * (pattern * expr) list
-	(* Let bindings *)
-	| Let			of bool * pattern * expr * expr
-	(* Conditionals - if..then without else has unit as else clause *)
+	(* Let bindings. The semantics of let-value and let-rec are so different
+	   that I just split them up. *)
+	| E_LetVal		of pattern * expr * expr
+	| E_LetRec		of string * expr * expr
+	(* Conditionals - if..then without else has a LiteralUnit else clause *)
 	| If			of expr * expr * expr
 	(* Functions - curried because fouine has currying *)
 	| Function		of pattern * expr
@@ -67,7 +57,7 @@ type tree =
 	| Bang			of expr
 	| Assign		of expr * expr
 	(* Tuples *)
-	| ExprTuple		of expr list
+	| E_Tuple		of expr list
 	(* Unary arithmetic operators (int -> int) *)
 	| UPlus			of expr
 	| UMinus		of expr
@@ -85,9 +75,27 @@ type tree =
 	| LowerEqual	of expr * expr
 
 and expr = {
-	tree: tree;		(* The expression tree *)
-	range: range;	(* Where the expression is located in the source *)
+	tree: expr_tree;	(* The expression tree *)
+	range: range;		(* Where the expression is located in the source *)
 }
+
+(* pattern
+   Pattern-matching expressions used by let bindings, match statements and
+   indirect bindings in function arguments *)
+and pattern =
+	| P_Name of string
+	(* Ignored binding "let _ = ..." or wildcard "_" *)
+	| P_Wildcard
+	(* Literal values, must match exactly. I can't really put a "value" here
+	   because patterns are more restricted and can (obviously) be used with
+	   types that support comparison; functions don't. *)
+	| P_Int of int
+	| P_Bool of bool
+	| P_Unit
+	(* Product types (tuples) *)
+	| P_Tuple of pattern list
+	(* ADT constructors *)
+	| P_Ctor of string * pattern
 
 (* StringMap
    A map object that associates strings to, here, values or type names *)
@@ -103,24 +111,24 @@ module StringSet = Set.Make(String)
    statement without else could be typed without error. *)
 type value =
 	(* Literal values *)
-	| Int of int
-	| Bool of bool
-	| Unit
+	| V_Int of int
+	| V_Bool of bool
+	| V_Unit
 	(* See "memory.ml" for reference implementation *)
-	| Reference of memory_addr
+	| V_Ref of memory_addr
 	(* Tuples *)
-	| Tuple of value list
+	| V_Tuple of value list
 	(* Constructor of an ADT *)
-	| Ctor of string * value
+	| V_Ctor of string * value
 	(* Functions retain a closure (not a full environment, see below), the name
 	   which is recursively bound to the function (or None), their argument and
 	   their body. See "eval.ml" for recursion details *)
-	| Closure of value StringMap.t * string option * pattern * expr
+	| V_Closure of value StringMap.t * string option * pattern * expr
 	(* A placeholder captured as a free variable by recursive functions
 	   mentioning themselves (this avoids name errors). I could do type
 	   inference for recursive functions by inferring the most general type for
 	   this placeholder and unifying it with the type of the body *)
-	| Recursive
+	| V_Rec
 
 (* env
    A set of name -> value mappings, as well as a set of name -> type mappings

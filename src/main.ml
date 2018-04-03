@@ -5,26 +5,34 @@ open Eval
 open Exceptions
 open Pattern
 open Lexing
+open Shell
+open Toplevel
 
 (* Command-line options *)
 type options = {
-	help:	bool;		(* Show help message and return *)
 	file:	string;		(* Specifies the file to execute *)
-	stdin:	bool;		(* Read from stdin. Has precedence over "file" *)
+	stdin:	bool;		(* Read from stdin (has precedence over <file> *)
+	shell:	bool;		(* Use the interactive REPL shell (fallback) *)
+
 	ast:	bool;		(* Display the AST before executing *)
 	debug:	bool;		(* Show program source, akin to -ast *)
 	parse:	bool;		(* Stop after parsing (for parsing-only tests) *)
+
+	help:	bool;		(* Show help message and return *)
 	_ok:	bool;		(* Says whether the configuration is valid *)
 }
 
 (* Default configuration mode - run silently *)
 let default_conf = {
-	help	= false;
 	file 	= "";
 	stdin	= false;
+	shell	= false;
+
 	ast		= false;
 	debug	= false;
 	parse	= false;
+
+	help	= false;
 	_ok		= true;
 }
 
@@ -35,13 +43,16 @@ let default_conf = {
 let options_parse argv =
 	let rec options_one i conf =
 		if i >= Array.length argv then conf else
-		match argv.(i) with
-		| "--help"	-> options_one (i + 1) { conf with help = true }
-		| "-stdin"	-> options_one (i + 1) { conf with stdin = true }
-		| "-ast"	-> options_one (i + 1) { conf with ast = true }
-		| "-debug"	-> options_one (i + 1) { conf with debug = true }
-		| "-parse"	-> options_one (i + 1) { conf with parse = true }
-		| filename	-> options_one (i + 1) { conf with file = filename } in
+		let conf' = match argv.(i) with
+		| "--help"	-> { conf with help = true }
+
+		| "-stdin"	-> { conf with stdin = true }
+
+		| "-ast"	-> { conf with ast = true }
+		| "-debug"	-> { conf with debug = true }
+		| "-parse"	-> { conf with parse = true }
+		| filename	-> { conf with file = filename } in
+		options_one (i + 1) conf' in
 
 	(* Perform some checks *)
 	let conf = ref (options_one 1 default_conf) in
@@ -55,10 +66,8 @@ let options_parse argv =
 	end;
 
 	(* Specify at least one of file input and stdin input *)
-	if !conf.file = "" && not !conf.stdin then begin
-		conf := { !conf with _ok = false };
-		Printf.fprintf stderr "error: no file name and -stdin not specified\n"
-	end;
+	if !conf.file = "" && not !conf.stdin then
+		conf := { !conf with shell = true };
 
 	(* Help message in case something goes wrong *)
 	if not (!conf._ok) then
@@ -114,10 +123,14 @@ let exception_report func =
 let help_message =
 "fouine - an interpreter for a subset of Caml\n" ^
 "usage: fouine [options...] <file>\n" ^
-"       fouine -stdin [options...]\n" ^
+"       fouine [-stdin] [options...]\n" ^
 "\n" ^
-"Available options:\n" ^
-"  -stdin    Read from stdin, not file (expect shorter error diagnoses)\n" ^
+"Input options:\n" ^
+"  <file>    Execute <file>, then leave\n" ^
+"  -stdin    Read from stdin (expect shorter error diagnoses)\n" ^
+"  (none)    Start the Read-Eval-Print Loop shell\n" ^
+"\n" ^
+"Debugging options:\n" ^
 "  -ast      After parsing, show an AST\n" ^
 "  -debug    After parsing, show regenerated sources (overrides -ast)\n" ^
 "  -parse    Stop after parsing; do not evaluate\n"
@@ -130,6 +143,9 @@ let s_get_this_show_on_the_road =
 	(* Show help message if requested - then leave *)
 	if conf.help then (print_string help_message; exit 0);
 
+	(* Start the REPL mode when -repl is specified *)
+	if conf.shell then (shell_main conf; exit 0);
+
 	(* Open the source script *)
 	let (channel, name) =
 			if conf.stdin then (stdin, "")
@@ -141,14 +157,14 @@ let s_get_this_show_on_the_road =
 	lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = name };
 
 	(* Parse the source file *)
-	let ast = Parser.toplevel (Lexer.main) lexbuf in
+	let decls = Parser.toplevel (Lexer.main) lexbuf in
 
 	(* Close the source channel if it's a file *)
 	if not conf.stdin then close_in channel;
 
 	(* Display the source if -debug is on, or the AST if -ast is on *)
-	if conf.debug then expr_source 0 ast
-	else if conf.ast then expr_print 0 ast;
+	if conf.debug then List.iter decl_source decls
+	else if conf.ast then List.iter decl_print decls;
 
 	(* Stop now if -parse is on, we don't need to evaluate *)
 	if conf.parse then exit 0;
@@ -162,6 +178,7 @@ let s_get_this_show_on_the_road =
 
 	let failed = exception_report (fun () ->
 		let env = { vars = env_vars; types = env_types } in
-		eval ast env
+		let eval_one env decl = fst (decl_eval decl env) in
+		List.fold_left eval_one env decls
 	) in
 	exit (if failed then 1 else 0)

@@ -19,13 +19,13 @@ let rec expr_free exp =
 	match exp.tree with
 
 	(* Bases cases with one or no free variable *)
-	| LiteralInt _ | LiteralBool _ | LiteralUnit | TypeDecl _ ->
+	| E_Int _ | E_Bool _ | E_Unit ->
 		StringSet.empty
-	| Name n ->
+	| E_Name n ->
 		StringSet.of_list [ n ]
 
 	(* Trivial recursion - ADTs and unary "operators" *)
-	| ExprCtor (_, e) | Ref e | Bang e | UPlus e | UMinus e ->
+	| E_Ctor (_, e) | Ref e | Bang e | UPlus e | UMinus e ->
 		expr_free e
 
 	(* Union of two recursive sets *)
@@ -40,9 +40,12 @@ let rec expr_free exp =
 	| If (e, t, f) ->
 		StringSet.union (expr_free e)
 		(StringSet.union (expr_free t) (expr_free f))
-	| Let (_, pat, e, f) ->
+	| E_LetVal (pat, e, f) ->
 		let un = StringSet.union (expr_free e) (expr_free f)
 		in StringSet.diff un (pattern_free pat)
+	| E_LetRec (name, e, f) ->
+		let un = StringSet.union (expr_free e) (expr_free f)
+		in StringSet.remove name un
 
 	(* Pattern matching is the hardest *)
 	| Match (e, cl) ->
@@ -55,7 +58,7 @@ let rec expr_free exp =
 		StringSet.diff (expr_free e) (pattern_free pat)
 
 	(* Tuples *)
-	| ExprTuple l ->
+	| E_Tuple l ->
 		List.fold_left StringSet.union StringSet.empty (List.map expr_free l)
 
 (* expr_print [int -> expr -> unit]
@@ -75,16 +78,12 @@ let rec expr_print indent exp =
 
 	match exp.tree with
 
-	| LiteralInt i  -> Printf.printf "%d\n" i
-	| LiteralBool b -> print_string (if b then "true\n" else "false\n")
-	| LiteralUnit   -> print_string "()\n"
-	| Name n		-> Printf.printf "{%s}\n" n
+	| E_Int i	-> Printf.printf "%d\n" i
+	| E_Bool b	-> print_string (if b then "true\n" else "false\n")
+	| E_Unit	-> print_string "()\n"
+	| E_Name n	-> Printf.printf "{%s}\n" n
 
-	| TypeDecl (name, ctors, e) ->
-		Printf.printf "type %s" name;
-		List.iter (fun c -> space (); print_string ("  " ^ c ^ "\n")) ctors;
-		expr_print indent e;
-	| ExprCtor (ctor, e) -> recurse ctor [e]
+	| E_Ctor (ctor, e) -> recurse ctor [e]
 
 	| Match (e, cl) ->
 		recurse "match" [e];
@@ -93,12 +92,13 @@ let rec expr_print indent exp =
 			recurse (pattern_str p ^ " -> ") [e]
 		) cl
 
-	| Let (recursive, pat, e, f) ->
-		let key = if recursive then "let rec " else "let " in
-		recurse (key ^ pattern_str pat ^ " = ") [e; f]
+	| E_LetVal (pat, e, f) ->
+		recurse ("let " ^ pattern_str pat ^ " = .. in") [e; f]
+	| E_LetRec (name, e, f) ->
+		recurse ("let rec " ^ name ^ " = .. in") [e; f]
 
 	| If (e, t, f) ->
-		if f.tree = LiteralUnit then recurse "if-then" [e; t]
+		if f.tree = E_Unit then recurse "if-then" [e; t]
 		else recurse "if-then-else" [e; t; f]
 
 	| Function (pat, e) ->
@@ -109,10 +109,10 @@ let rec expr_print indent exp =
 	| Ref e 		-> recurse "ref" [e]
 	| Assign (e, f)	-> recurse ":=" [e; f]
 
-	| ExprTuple l	-> recurse "tuple" l
+	| E_Tuple l		-> recurse "tuple" l
 
-	| UPlus  e -> recurse "+/1" [e]
-	| UMinus e -> recurse "-/1" [e]
+	| UPlus  e		-> recurse "+/1" [e]
+	| UMinus e		-> recurse "-/1" [e]
 
 	| Plus			(e, f) -> recurse "+" [e; f]
 	| Minus			(e, f) -> recurse "-" [e; f]
@@ -145,15 +145,12 @@ let rec expr_source2 level exp =
 	match exp.tree with
 
 	(* Simple cases *)
-	| LiteralInt  i	-> print_int i
-	| LiteralBool b	-> print_string (if b then "true" else "false")
-	| LiteralUnit	-> print_string "()"
-	| Name n		-> print_string n
+	| E_Int  i	-> print_int i
+	| E_Bool b	-> print_string (if b then "true" else "false")
+	| E_Unit	-> print_string "()"
+	| E_Name n	-> print_string n
 
-	| TypeDecl (name, ctors, e) ->
-		Printf.printf "type %s = %s\n" name (String.concat " | " ctors);
-		expr_source2 level e
-	| ExprCtor (ctor, e) ->
+	| E_Ctor (ctor, e) ->
 		Printf.printf "%s " ctor;
 		expr_source2 level e
 
@@ -169,18 +166,19 @@ let rec expr_source2 level exp =
 		) cl;
 		print_string ")";
 
-	(* Composed expressions. For lets, only increase indent when there are
-	   parameters (ie. function definition vs variable binding) *)
-	| Let (recursive, pat, e, f) ->
-		let key = if recursive then "let rec " else "let " in
-		print_string (key ^ pattern_str pat ^ " = ");
+	| E_LetVal (pat, e, f) ->
+		print_string ("let " ^ pattern_str pat ^ " = ");
 		expr_source2 level e;
 		print_string " in\n";
-		(* TODO: Figure this out *)
-		(* let newlevel = if snd binding != [] then level + 1 else level in *)
-		let newlevel = level in
-		space newlevel;
-		expr_source2 newlevel f
+		space level;
+		expr_source2 level f
+
+	| E_LetRec (name, e, f) ->
+		print_string ("let rec " ^ name ^ " = ");
+		expr_source2 level e;
+		print_string " in\n";
+		space level;
+		expr_source2 level f
 
 	| If (e, t, f) ->
 		print_string "if ";
@@ -218,9 +216,9 @@ let rec expr_source2 level exp =
 	| Assign (e, f) -> binary ":=" e f
 
 	(* Tuples - normally no tuple should be empty... *)
-	| ExprTuple [] ->
-		print_string "<empty tuple?>"
-	| ExprTuple (hd :: tl) ->
+	| E_Tuple [] ->
+		print_string "<empty tuple?!>"
+	| E_Tuple (hd :: tl) ->
 		print_string "(";
 		expr_source2 level hd;
 		List.iter (fun x -> print_string ","; expr_source2 level x) tl;

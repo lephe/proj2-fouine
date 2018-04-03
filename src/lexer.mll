@@ -31,8 +31,8 @@ rule main = parse
 	| '!'  { BANG }
 	| ','  { COMMA }
 	| '|'  { PIPE }
-	| '['  { LBRACKET }
-	| ']'  { RBRACKET }
+	| '['  { LBRACK }
+	| ']'  { RBRACK }
 	| "::" { CONS }
 
 	(* Operators *)

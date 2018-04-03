@@ -1,0 +1,87 @@
+---
+
+-- Sébastien --
+
+# let f x y = y;;
+val f : 'a -> 'b -> 'b = <fun>
+# f 2 5;;
+- : int = 5
+# f 2 "a";;
+- : string = "a"
+# let g = f 2;;
+val g : '_weak1 -> '_weak1 = <fun>
+# g 5;;
+- : int = 5
+# g "a";;
+Error: This expression has type string but an expression was expected of type int
+
+-- Yoann --
+
+# let a = ref (ref 8)
+- : int ref ref
+
+# let list_rev = ...
+
+# let a_thing_returning_an_integer_triplet = ...
+
+# let f a a = a + a in (f 8) 2
+- : int = 4
+
+# let list_sum = ...
+
+-- Lord Pseudocode --
+
+let f x = x;;
+let g = ref f;;
+!g 2;;
+!g [];;
+
+-- Sébastien --
+
+# let apply f x = (f f) x
+Error:
+
+# (!g !g) (* reprendre le g de Lord Pseudocode *)
+- : 'a -> 'a
+
+# let twist g = (g 2, g true)
+Error:
+
+-- (Yoann) --
+
+Binary trees and Algebraic Data Types.
+
+-- (Sébastien) --
+
+# let test1 f = (f true, f 0);;
+Error:
+# let f x = x in (f true, f 0);;
+- : bool * int = (true, 0)
+
+# let first x y = x;;
+val first : 'a -> 'b -> 'a = <fun>
+# first 1;;
+- : '_weak1 -> int = <fun>
+# fun y -> first 1 y;;
+- : 'a -> int = <fun>
+
+# let r = ref [];;
+val r : '_weak1 list ref = {contents = []}
+# r := [2];;
+- : unit = ()
+# List.map ((=) true) !r;;
+Error:
+
+--- (Yoann)
+
+# let l = [];;
+val l : 'a list = []
+# 1 :: l;;
+- : int list = [1]
+# l;;
+- : 'a list = []
+
+# let l = [(fun x -> x); (fun x -> x + 1)];;
+- : (int -> int) list = [<fun>; <fun>]
+
+les "pour tout" sont embêtants et j'obtiens ('a -> 'a) list

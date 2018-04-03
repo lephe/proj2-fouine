@@ -15,39 +15,39 @@ open Memory
 (* value_type [value -> env -> string]
    A textual representation of a value's type, withing a given environment *)
 let rec value_type v env = match v with
-	| Int _			-> "int"
-	| Bool _		-> "bool"
-	| Unit			-> "unit"
-	| Reference _	-> "ref"
-	| Ctor (c, _)	-> StringMap.find c env.types
-	| Recursive		-> "<recursion placeholder>"
-	| Closure (_, None, _, _) -> "<closure>"
-	| Closure (_, Some _,  _, _) -> "<recursive closure>"
-	| Tuple l ->
+	| V_Int _		-> "int"
+	| V_Bool _		-> "bool"
+	| V_Unit		-> "unit"
+	| V_Ref _		-> "ref"
+	| V_Ctor (c, _)	-> StringMap.find c env.types
+	| V_Rec			-> "<recursion placeholder>"
+	| V_Closure (_, None, _, _) -> "<closure>"
+	| V_Closure (_, Some _,  _, _) -> "<recursive closure>"
+	| V_Tuple l ->
 		let f v = value_type v env in
 		"(" ^ String.concat " * " (List.map f l) ^ ")"
 
 (* value_str [value -> string]
    Returns a printable (not unambiguous) representation of a value *)
 let rec value_str v = match v with
-	| Int i			-> string_of_int i
-	| Bool b		-> if b then "true" else "false"
-	| Unit			-> "()"
-	| Reference r	-> "ref " ^ (memory_addr_str r)
-	| Ctor (c, e)	-> c ^ " " ^ (value_str e)
-	| Recursive		-> "<cycle placeholder>"
-	| Closure (e, recursive, pat, t) ->
+	| V_Int i		-> string_of_int i
+	| V_Bool b		-> if b then "true" else "false"
+	| V_Unit		-> "()"
+	| V_Ref r		-> "ref " ^ (memory_addr_str r)
+	| V_Ctor (c, e)	-> c ^ " " ^ (value_str e)
+	| V_Rec			-> "<cycle placeholder>"
+	| V_Closure (e, recursive, pat, t) ->
 		if recursive <> None then "<rec closure>" else "<closure>"
-	| Tuple l -> "(" ^ String.concat ", " (List.map value_str l) ^ ")"
+	| V_Tuple l -> "(" ^ String.concat ", " (List.map value_str l) ^ ")"
 
 (* value_print [value -> unit]
    Outputs a description of the value on stdout. This function gives more
    detailed output than value_str on closures *)
 let rec value_print v = match v with
-	| Int _ | Bool _ | Unit | Reference _ | Ctor _ | Recursive | Tuple _ ->
+	| V_Int _ | V_Bool _ | V_Unit | V_Ref _ | V_Ctor _ | V_Rec | V_Tuple _ ->
 		print_string (value_str v ^ "\n")
 	(* TODO: Recursively show free functions in closure *)
-	| Closure (e, recursive, pat, t) ->
+	| V_Closure (e, recursive, pat, t) ->
 		let r = if recursive <> None then "(rec) " else "" in
 		print_string (r ^ "fun " ^ pattern_str pat ^ " ->\n"); expr_print 0 t
 
@@ -71,12 +71,12 @@ let unify_bind pat value env : env =
 
 let rec expect_int exp env =
 	let v = eval exp env in match v with
-	| Int i -> i
+	| V_Int i -> i
 	| _ -> raise (TypeError (exp.range, "int", value_type v env))
 
 and expect_closure exp env =
 	let v = eval exp env in match v with
-	| Closure (closure, recursive, pat, exp) -> (closure, recursive, pat, exp)
+	| V_Closure (closure, recursive, pat, exp) -> (closure, recursive, pat,exp)
 	| _ -> raise (TypeError (exp.range, "function", value_type v env))
 
 (* eval [expr -> env -> value]
@@ -97,51 +97,30 @@ and eval exp env : value =
 	let arith op e f =
 		let a = expect_int e env
 		and b = expect_int f env in
-		Int (op a b) in
+		V_Int (op a b) in
 
 	(* Another one for comparisons *)
 	let comp op e f =
 		let a = expect_int e env
 		and b = expect_int f env in
-		Bool (op a b) in
+		V_Bool (op a b) in
 
 	match exp.tree with
 
 	(* Immediately return literals, lookup names in the environment *)
-	| LiteralInt i	-> Int i
-	| LiteralBool b	-> Bool b
-	| LiteralUnit	-> Unit
-	| Name n ->
+	| E_Int i		-> V_Int i
+	| E_Bool b		-> V_Bool b
+	| E_Unit		-> V_Unit
+	| E_Name n ->
 		begin try StringMap.find n env.vars with
 		| Not_found -> raise (NameError (exp.range, n))
 		end
 
-	(* Type declarations - extend the existing constructor set *)
-	| TypeDecl (name, ctors, e) ->
-		(* Check that constructors are not defined twice *)
-		let rec check ctor types =
-			if StringMap.mem ctor types
-			then raise (TypeOverload (exp.range, ctor)) in
-
-		(* Check that the type name is not already used *)
-		if List.exists (fun n ->
-			try StringMap.find n env.types = name
-			with Not_found -> false)
-			ctors
-		then raise (MultiBind (true, exp.range, StringSet.singleton name)) else
-
-		(* Extend the environment with the new constructors *)
-		let add types ctor =
-			check ctor types;
-			StringMap.add ctor name types in
-		let newtypes = List.fold_left add env.types ctors in
-		eval e { env with types = newtypes }
-
 	(* Type constructors : check that the type exists, then bind *)
-	| ExprCtor (ctor, e) ->
+	| E_Ctor (ctor, e) ->
 		if not (StringMap.exists (fun k v -> k = ctor) env.types)
 		then raise (NameError (exp.range, ctor))
-		else Ctor (ctor, eval e env)
+		else V_Ctor (ctor, eval e env)
 
 	(* Pattern matching *)
 	| Match (e, cl) ->
@@ -157,76 +136,70 @@ and eval exp env : value =
 
 		try_cases cl v
 
-	(* Use term unification (actually filtering) to get the list of all
-	   bindings, then extend the environment *)
-	| Let (recursive, pat, e, f) ->
-		if not recursive then
-			let value = eval e env in
-			try eval f (unify_bind pat value env) with
-			| MatchError (_, p, v)  -> raise (MatchError (exp.range, p, v))
-			| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
+	(* Let-value: use term unification (rather, filtering) to get the list of
+	   all bindings, then extend the environment *)
+	| E_LetVal (pat, e, f) ->
+		(* unify_bind may throw various exceptions for which it does not have
+		   the range: add it on the fly *)
+		(* TODO: This would not be needed if patterns had a range *)
+		begin try eval f (unify_bind pat (eval e env) env) with
+		| MatchError (_, p, v)  -> raise (MatchError (exp.range, p, v))
+		| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
+		end
 
-		(* I implement recursion by setting a flag in the Closure object. When
-		   it's on, the function is added to the environment before being
-		   evaluated. I tried to add it to its closure, but the EnvMap type
-		   prevents it - unlike "(name, f) :: closure", "EnvMap.add name f
-		   closure" is a function call and therefore not allowed in the right-
-		   hand side of a let-rec value definition *)
-
-		(* First ensure the pattern has a suitable form *)
-		else let name = match pat with
-		| Identifier n -> n
-		| _ -> raise (Error (exp.range, "This kind of pattern is not " ^
-			"allowed inside a recursive binding")) in
-
+	(* Let-rec: I achieve recursion by setting an option in the Closure object.
+	   When it's on, the function is added to the environment before being
+	   evaluated. I tried to add it to its closure, but the EnvMap type doesn't
+	   support it - unlike "(name, f) :: closure", "EnvMap.add name f closure"
+	   is a function call and therefore not allowed in value-let-rec *)
+	| E_LetRec (name, e, f) ->
 		(* Add a dummy polymorphic value for free variable enumeration (see
 		   "types.ml" for a few more details *)
-		let tmp = { env with vars = StringMap.add name Recursive env.vars } in
+		let tmp = { env with vars = StringMap.add name V_Rec env.vars } in
 
 		(* Build the closure using this "Recursive", and remove it if it's been
-		   captured as a free variable *)
+		   captured as a free variable. It will be managed on-the-fly *)
 		let (closure, _, pat, exp) = expect_closure e tmp in
-		let vfun = Closure (StringMap.remove name closure, Some name, pat, exp)
+		let vfun = V_Closure (StringMap.remove name closure, Some name,pat,exp)
 
 		(* Then roll! *)
 		in eval f ({ env with vars = StringMap.add name vfun env.vars })
 
-	(* For functions - just build the closure by extracting free variables from
-	   the environment *)
+	(* Build function closures by enumerating free variables out of the
+	   environment *)
 	| Function (pat, e) ->
 		let freevars = expr_free exp in
-		(* Complain if the free variables are not defined *)
+		(* Complain if any free variables are not defined *)
 		let extract name closure =
 			let value = try StringMap.find name env.vars with
 			| Not_found -> raise (NameError (e.range, name)) in
 			StringMap.add name value closure in
-		(* Build the function's closure and return. We don't handle recursion,
-		   this is a work for Let *)
+		(* Build the closure and return. Recursion is handled by LetRec *)
 		let closure = StringSet.fold extract freevars StringMap.empty in
-		Closure (closure, None, pat, e)
+		V_Closure (closure, None, pat, e)
 
 	(* A special rule for the "simple calls" to function prInt *)
 	(* TODO: Add a value type "built-in function" for prInt *)
-	| Call ({ tree = Name "prInt" }, arg) ->
+	| Call ({ tree = E_Name "prInt" }, arg) ->
 		let i = expect_int arg env in
-		print_int i; print_newline (); Int i
+		print_int i; print_newline (); V_Int i
 
 	(* Evaluate and bind the argument, *then* evaluate the function *)
 	| Call (func, arg) ->
 		let varg = eval arg env in
 		let vfun = eval func env in
 
-		(* Add the function to the environment if it's recursive *)
 		begin try match vfun with
 
-		| Closure (closure, Some name, pat, exp) ->
+		(* Add the function to the environment if it's recursive *)
+		| V_Closure (closure, Some name, pat, exp) ->
 			let env = {
 				vars = StringMap.add name vfun closure;
 				types = env.types
 			} in
 			eval exp (unify_bind pat varg env)
 
-		| Closure (closure, None, pat, exp) ->
+		| V_Closure (closure, None, pat, exp) ->
 			let env = { vars = closure; types = env.types } in
 			eval exp (unify_bind pat varg env)
 
@@ -238,32 +211,32 @@ and eval exp env : value =
 		end
 
 	(* Conditions - straightforward, type checking happens here (although not
-	   required by fouine) *)
+		required by fouine) *)
 	| If (e, t, f) ->
 		begin match eval e env with
-		| Bool b -> if b then eval t env else eval f env
+		| V_Bool b -> if b then eval t env else eval f env
 		| v -> raise (TypeError (e.range, "bool", value_type v env))
 		end
 
 	(* References - note that Assign returns unit *)
-	| Ref e -> Reference (memory_create (eval e env))
+	| Ref e -> V_Ref (memory_create (eval e env))
 	| Bang e ->
 		let v = eval e env in begin match v with
-		| Reference addr -> memory_get addr
+		| V_Ref addr -> memory_get addr
 		| _ -> raise (TypeError (e.range, "reference", value_type v env))
 		end
 	| Assign (e, f) ->
 		let v = eval e env in begin match v with
-		| Reference addr -> memory_update addr (eval f env); Unit
+		| V_Ref addr -> memory_update addr (eval f env); V_Unit
 		| _ -> raise (TypeError (e.range, "reference", value_type v env))
 		end
 
 	(* Tuples *)
-	| ExprTuple l -> Tuple (List.map (fun x -> eval x env) l)
+	| E_Tuple l -> V_Tuple (List.map (fun x -> eval x env) l)
 
 	(* Arithmetic operations *)
-	| UPlus  e -> let i = expect_int e env in Int i
-	| UMinus e -> let i = expect_int e env in Int (-i)
+	| UPlus  e -> let i = expect_int e env in V_Int i
+	| UMinus e -> let i = expect_int e env in V_Int (-i)
 	| Plus		(e, f) -> arith (+) e f
 	| Minus		(e, f) -> arith (-) e f
 	| Times		(e, f) -> arith ( * ) e f
@@ -271,7 +244,7 @@ and eval exp env : value =
 		let a = expect_int e env
 		and b = expect_int f env in
 		if b = 0 then raise (ZeroDivision f.range)
-		else Int (a / b)
+		else V_Int (a / b)
 
 	(* Comparisons *)
 	| Equal			(e, f) -> comp (=)  e f
