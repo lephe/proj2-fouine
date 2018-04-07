@@ -1,13 +1,13 @@
 (*
-**  Typing - Type inference
-**  This is a variant of Algorithm W by Luis Damas and Robin Milner.
+**	Typing - Type inference
+**	This is a variant of Algorithm W by Damas and Milner.
 **
-**  Luis Damas, Robin Milner. Principal type-schemes for functional programs
-**  https://dl.acm.org/citation.cfm?id=582176
+**	Luis Damas, Robin Milner. Principal type-schemes for functional programs
+**	https://dl.acm.org/citation.cfm?id=582176
 *)
 
 (*
-**  Type definitions
+**	Type definitions
 *)
 
 exception WError of string
@@ -16,6 +16,7 @@ module IntSet = Set.Make(struct
 	type t = int
 	let compare = Pervasives.compare
 end)
+
 module IntMap = Map.Make(struct
 	type t = int
 	let compare = Pervasives.compare
@@ -59,7 +60,7 @@ type typevar = int
 type env = typevar StringMap.t
 
 (*
-**  Dummy utilities
+**	Dummy utilities
 *)
 
 (* print_greek [id -> unit]
@@ -140,8 +141,8 @@ let print_env env =
 	) env
 
 (*
-**  An Union-Find structure to map classes of type variables to monotypes
-**  TODO: Add link-by-rank on top of path compression
+**	An Union-Find structure to map classes of type variables to monotypes
+**	TODO: Add link-by-rank on top of path compression
 *)
 
 (* In this implementation:
@@ -201,7 +202,7 @@ let typevar_new () =
 	var
 
 (*
-**  Algorithm W
+**	Algorithm W
 *)
 
 (* The fixed-point combinator *)
@@ -341,7 +342,7 @@ let rec rewrite t = match t with
 	| _ -> t
 
 (*
-**  Test cases
+**	Test cases
 *)
 
 let testcase (env, exp) =

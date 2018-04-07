@@ -1,20 +1,17 @@
 (*
 **	Expr - Expression representation and evaluation
-**  Note : the code in this file is not very readable because of the not-so-
-**  interesting pattern matching in expr_print and expr_source. I apologize.
+**	Note : the code in this file is not very readable because of the not-so-
+**	interesting pattern matching in expr_print and expr_source. I apologize.
 *)
 
 open Types
-open Util
 open Pattern
-
-(*
-	Utility functions and expression manipulation
-	TODO: Enhance the way expression-printing functions are written
-*)
+open Exceptions
+open Memory
+open Value
 
 (* expr_free [expr -> StringSet.t]
-   Returns the set of all free variables in the given expression *)
+   Returns the set of free variables in an expression *)
 let rec expr_free exp =
 	match exp.tree with
 
@@ -24,233 +21,231 @@ let rec expr_free exp =
 	| E_Name n ->
 		StringSet.of_list [ n ]
 
-	(* Trivial recursion - ADTs and unary "operators" *)
-	| E_Ctor (_, e) | Ref e | Bang e | UPlus e | UMinus e ->
+	(* Trivial recursion - ADTs and unary operations *)
+	| E_Ctor (_, e) | E_Ref e | E_Bang e | E_UPlus e | E_UMinus e ->
 		expr_free e
 
-	(* Union of two recursive sets *)
-	| Plus (e, f) | Minus (e, f) | Times (e, f) | Divide (e, f)
-	| Equal (e, f) | NotEqual (e, f) | Greater (e, f)
-	| GreaterEqual (e, f) | Lower (e, f) | LowerEqual (e, f)
-	| Call (e, f)
-	| Assign (e, f) ->
+	(* Union of two or more recursive sets *)
+	| E_Plus  (e, f) | E_Minus      (e, f) | E_Times   (e, f) | E_Divide (e, f)
+	| E_Equal (e, f) | E_NotEqual   (e, f) | E_Greater (e, f)
+	| E_Lower (e, f) | E_LowerEqual (e, f) | E_GreaterEqual (e, f)
+	| E_Call (e, f)
+	| E_Assign (e, f) ->
 		StringSet.union (expr_free e) (expr_free f)
-
-	(* Compound expressions *)
-	| If (e, t, f) ->
+	| E_If (e, t, f) ->
 		StringSet.union (expr_free e)
 		(StringSet.union (expr_free t) (expr_free f))
+	| E_Tuple l ->
+		List.fold_left StringSet.union StringSet.empty (List.map expr_free l)
+
+	(* Bindings that remove free variables *)
 	| E_LetVal (pat, e, f) ->
 		let un = StringSet.union (expr_free e) (expr_free f)
 		in StringSet.diff un (pattern_free pat)
 	| E_LetRec (name, e, f) ->
 		let un = StringSet.union (expr_free e) (expr_free f)
 		in StringSet.remove name un
+	| E_Function (pat, e) ->
+		StringSet.diff (expr_free e) (pattern_free pat)
 
-	(* Pattern matching is the hardest *)
-	| Match (e, cl) ->
+	(* Pattern matching, quite the hardest *)
+	| E_Match (e, cl) ->
 		let case_free (p, e) =
 			StringSet.diff (expr_free e) (pattern_free p) in
 		List.fold_left StringSet.union (expr_free e) (List.map case_free cl)
 
-	(* Functions *)
-	| Function (pat, e) ->
-		StringSet.diff (expr_free e) (pattern_free pat)
+
+
+(* The following functions destruct a value while expecting a specific type.
+   They return the constructor argument on success and throw a type error in
+   all other cases *)
+
+(* TODO: Do something about the expect_* functions. Typing will make sure that
+   TODO: the type is correct, but OCaml will not know... *)
+
+let rec expect_int exp env =
+	let v = expr_eval exp env in match v with
+	| V_Int i -> i
+	| _ -> raise (TypeError (exp.range, "int", value_type v env))
+
+and expect_closure exp env =
+	let v = expr_eval exp env in match v with
+	| V_Closure (closure, recursive, pat, exp) -> (closure, recursive, pat,exp)
+	| _ -> raise (TypeError (exp.range, "function", value_type v env))
+
+(* expr_eval [expr -> env -> value]
+   Recursively evaluates a single expression within an environment, yielding a
+   value (or throwing an exception). The environment argument contains both
+   values and types, which makes this function pure *)
+and expr_eval exp env : value =
+
+	(* This piece of code would automatically show the evaluated expression and
+	   a dump of the environment in the terminal. This is very verbose!
+	print_string "<<< Evaluating\n";
+	range_highlight exp.range stdout;
+	EnvMap.iter (fun n v -> Printf.printf "%s: %s\n" n (repr_value v) env.vars;
+	print_newline (); *)
+
+	let eval = expr_eval in
+
+	(* A helper for arithmetic operators *)
+	let arith op e f =
+		let a = expect_int e env
+		and b = expect_int f env in
+		V_Int (op a b) in
+
+	(* Another one for comparisons *)
+	let comp op e f =
+		let a = expect_int e env
+		and b = expect_int f env in
+		V_Bool (op a b) in
+
+	match exp.tree with
+
+	(* Immediately return literals *)
+	| E_Int i		-> V_Int i
+	| E_Bool b		-> V_Bool b
+	| E_Unit		-> V_Unit
+	(* Lookup names in the environment *)
+	| E_Name n ->
+		begin try StringMap.find n env.vars with
+		| Not_found -> raise (NameError (exp.range, n))
+		end
+
+	(* Type constructors : first check that the constructor exists *)
+	| E_Ctor (ctor, e) ->
+		if not (StringMap.exists (fun k v -> k = ctor) env.types)
+		then raise (NameError (exp.range, ctor))
+		else V_Ctor (ctor, eval e env)
+
+	(* Pattern matching *)
+	| E_Match (e, cl) ->
+		let v = eval e env in
+
+		(* Try to bind the argument to all patterns, in order *)
+		let rec try_cases cl v = match cl with
+		| [] -> raise (MatchError (exp.range, None, v))
+		| (p, e) :: tl ->
+			try let newenv = pattern_bind p v env in eval e newenv with
+			| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
+			| MatchError _ -> try_cases tl v in
+
+		try_cases cl v
+
+	(* Let-value: use term unification (rather, filtering) to get the list of
+	   all bindings, then extend the environment *)
+	| E_LetVal (pat, e, f) ->
+		(* pattern_bind may throw various exceptions for which it does not have
+		   the range: add it on the fly *)
+		(* TODO: This would not be needed if patterns had a range *)
+		begin try eval f (pattern_bind pat (eval e env) env) with
+		| MatchError (_, p, v)  -> raise (MatchError (exp.range, p, v))
+		| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
+		end
+
+	(* Let-rec: I achieve recursion by setting an option in the Closure object.
+	   When it's on, the function is added to the environment before being
+	   evaluated. I tried to add it to its closure, but the EnvMap type doesn't
+	   support it - unlike "(name, f) :: closure", "EnvMap.add name f closure"
+	   is a function call and therefore not allowed in value-let-rec *)
+	| E_LetRec (name, e, f) ->
+		(* Add a dummy polymorphic value for free variable enumeration (see
+		   "types.ml" for a few more details *)
+		let tmp = { env with vars = StringMap.add name V_Rec env.vars } in
+
+		(* Build the closure using this "V_Rec", and remove it if it's been
+		   captured as a free variable. It will be managed on-the-fly *)
+		let (closure, _, pat, exp) = expect_closure e tmp in
+		let vfun = V_Closure (StringMap.remove name closure, Some name,pat,exp)
+
+		(* Then roll! *)
+		in eval f ({ env with vars = StringMap.add name vfun env.vars })
+
+	(* Build function closures by enumerating free variables out of the
+	   environment *)
+	| E_Function (pat, e) ->
+		let freevars = expr_free exp in
+		(* Complain if any free variables are not defined *)
+		let extract name closure =
+			let value = try StringMap.find name env.vars with
+			| Not_found -> raise (NameError (e.range, name)) in
+			StringMap.add name value closure in
+		(* Build the closure and return. Recursion is handled by LetRec *)
+		let closure = StringSet.fold extract freevars StringMap.empty in
+		V_Closure (closure, None, pat, e)
+
+	(* A special rule for the "simple calls" to function prInt *)
+	(* TODO: Add a value type "built-in function" for prInt *)
+	| E_Call ({ tree = E_Name "prInt" }, arg) ->
+		let i = expect_int arg env in
+		print_int i; print_newline (); V_Int i
+
+	(* Evaluate and bind the argument, *then* evaluate the function *)
+	| E_Call (func, arg) ->
+		let varg = eval arg env in
+		let vfun = eval func env in
+
+		begin try match vfun with
+
+		(* Add the function to the environment if it's recursive *)
+		| V_Closure (closure, Some name, pat, exp) ->
+			let env = {
+				vars = StringMap.add name vfun closure;
+				types = env.types
+			} in
+			eval exp (pattern_bind pat varg env)
+
+		| V_Closure (closure, None, pat, exp) ->
+			let env = { vars = closure; types = env.types } in
+			eval exp (pattern_bind pat varg env)
+
+		(* Reject values... *)
+		| _ -> raise (TypeError (func.range, "function", value_type vfun env))
+		with
+		| MatchError (_, p, v)  -> raise (MatchError (exp.range, p, v))
+		| MultiBind (b, _, set) -> raise (MultiBind (b, exp.range, set))
+		end
+
+	(* Conditions - straightforward, type checking happens here (although not
+		required by fouine) *)
+	| E_If (e, t, f) ->
+		begin match eval e env with
+		| V_Bool b -> if b then eval t env else eval f env
+		| v -> raise (TypeError (e.range, "bool", value_type v env))
+		end
+
+	(* References - note that Assign returns V_Unit *)
+	| E_Ref e -> V_Ref (memory_store (eval e env))
+	| E_Bang e ->
+		let v = eval e env in begin match v with
+		| V_Ref addr -> memory_get addr
+		| _ -> raise (TypeError (e.range, "reference", value_type v env))
+		end
+	| E_Assign (e, f) ->
+		let v = eval e env in begin match v with
+		| V_Ref addr -> memory_update addr (eval f env); V_Unit
+		| _ -> raise (TypeError (e.range, "reference", value_type v env))
+		end
 
 	(* Tuples *)
-	| E_Tuple l ->
-		List.fold_left StringSet.union StringSet.empty (List.map expr_free l)
+	| E_Tuple l -> V_Tuple (List.map (fun x -> eval x env) l)
 
-(* expr_print [int -> expr -> unit]
-   Display the syntax tree of an expression on stdout, indenting each line with
-   the provided level of indent. This function assumes that it's called at the
-   beginning of a line, and prints a final newline *)
-let rec expr_print indent exp =
+	(* Arithmetic operations *)
+	| E_UPlus  e	-> let i = expect_int e env in V_Int i
+	| E_UMinus e	-> let i = expect_int e env in V_Int (-i)
+	| E_Plus		(e, f) -> arith (+) e f
+	| E_Minus		(e, f) -> arith (-) e f
+	| E_Times		(e, f) -> arith ( * ) e f
+	| E_Divide		(e, f) ->
+		let a = expect_int e env
+		and b = expect_int f env in
+		if b = 0 then raise (ZeroDivision f.range)
+		else V_Int (a / b)
 
-	(* Print 2 * 'indent' spaces, the smart way *)
-	let space () =
-		Printf.printf "(%s) %*s" (range_str exp.range) (2 * indent) "" in
-	space ();
-
-	let recurse (str: string) (children: expr list) : unit =
-		print_string (str ^ "\n");
-		List.iter (expr_print (indent + 1)) children in
-
-	match exp.tree with
-
-	| E_Int i	-> Printf.printf "%d\n" i
-	| E_Bool b	-> print_string (if b then "true\n" else "false\n")
-	| E_Unit	-> print_string "()\n"
-	| E_Name n	-> Printf.printf "{%s}\n" n
-
-	| E_Ctor (ctor, e) -> recurse ctor [e]
-
-	| Match (e, cl) ->
-		recurse "match" [e];
-		List.iter (fun (p, e) ->
-			space ();
-			recurse (pattern_str p ^ " -> ") [e]
-		) cl
-
-	| E_LetVal (pat, e, f) ->
-		recurse ("let " ^ pattern_str pat ^ " = .. in") [e; f]
-	| E_LetRec (name, e, f) ->
-		recurse ("let rec " ^ name ^ " = .. in") [e; f]
-
-	| If (e, t, f) ->
-		if f.tree = E_Unit then recurse "if-then" [e; t]
-		else recurse "if-then-else" [e; t; f]
-
-	| Function (pat, e) ->
-		recurse ("fun " ^ pattern_str pat ^ " ->") [e]
-	| Call (f, v) -> recurse "call" [f; v]
-
-	| Bang e		-> recurse "!" [e]
-	| Ref e 		-> recurse "ref" [e]
-	| Assign (e, f)	-> recurse ":=" [e; f]
-
-	| E_Tuple l		-> recurse "tuple" l
-
-	| UPlus  e		-> recurse "+/1" [e]
-	| UMinus e		-> recurse "-/1" [e]
-
-	| Plus			(e, f) -> recurse "+" [e; f]
-	| Minus			(e, f) -> recurse "-" [e; f]
-	| Times			(e, f) -> recurse "*" [e; f]
-	| Divide		(e, f) -> recurse "/" [e; f]
-
-	| Equal			(e, f) -> recurse "="  [e; f]
-	| NotEqual		(e, f) -> recurse "<>" [e; f]
-	| Greater		(e, f) -> recurse ">"  [e; f]
-	| GreaterEqual	(e, f) -> recurse ">=" [e; f]
-	| Lower			(e, f) -> recurse "<"  [e; f]
-	| LowerEqual	(e, f) -> recurse "<=" [e; f]
-
-(* expr_source2 [int -> expr -> unit] [private]
-   Produce a human-readable listing of an expression
-   TODO: Avoid some parentheses by performing priority analysis *)
-let rec expr_source2 level exp =
-
-	let space level =
-		(* Print 2 * 'level' spaces, the smart way *)
-		Printf.printf "%*s" (2 * level) "" in
-
-	let binary op e f =
-		print_string "(";
-		expr_source2 level e;
-		print_string (") " ^ op ^ " (");
-		expr_source2 level f;
-		print_string ")" in
-
-	match exp.tree with
-
-	(* Simple cases *)
-	| E_Int  i	-> print_int i
-	| E_Bool b	-> print_string (if b then "true" else "false")
-	| E_Unit	-> print_string "()"
-	| E_Name n	-> print_string n
-
-	| E_Ctor (ctor, e) ->
-		Printf.printf "%s " ctor;
-		expr_source2 level e
-
-	| Match (e, cl) ->
-		print_string "(match ";
-		expr_source2 level e;
-		print_string " with ";
-		List.iter (fun (p, e) ->
-			print_string "\n";
-			space (level + 1);
-			Printf.printf "| %s -> " (pattern_str p);
-			expr_source2 (level + 1) e
-		) cl;
-		print_string ")";
-
-	| E_LetVal (pat, e, f) ->
-		print_string ("let " ^ pattern_str pat ^ " = ");
-		expr_source2 level e;
-		print_string " in\n";
-		space level;
-		expr_source2 level f
-
-	| E_LetRec (name, e, f) ->
-		print_string ("let rec " ^ name ^ " = ");
-		expr_source2 level e;
-		print_string " in\n";
-		space level;
-		expr_source2 level f
-
-	| If (e, t, f) ->
-		print_string "if ";
-		expr_source2 level e;
-		print_string " then\n";
-		space (level + 1);
-		expr_source2 (level + 1) t;
-		print_string "\n";
-		space level;
-		print_string "else\n";
-		space (level + 1);
-		expr_source2 (level + 1) f
-
-	(* Functional expressions *)
-	| Function (pat, e) ->
-		print_string ("(fun " ^ pattern_str pat ^ " ->\n");
-		space (level + 1);
-		expr_source2 (level + 1) e;
-		print_string ")"
-	| Call (f, arg) ->
-		expr_source2 level f;
-		print_string " (";
-		expr_source2 level arg;
-		print_string ")"
-
-	(* Reference-related *)
-	| Bang e ->
-		print_string "!(";
-		expr_source2 level e;
-		print_string ")"
-	| Ref arg ->
-		print_string "ref (";
-		expr_source2 level arg;
-		print_string ")"
-	| Assign (e, f) -> binary ":=" e f
-
-	(* Tuples - normally no tuple should be empty... *)
-	| E_Tuple [] ->
-		print_string "<empty tuple?!>"
-	| E_Tuple (hd :: tl) ->
-		print_string "(";
-		expr_source2 level hd;
-		List.iter (fun x -> print_string ","; expr_source2 level x) tl;
-		print_string ")"
-
-	(* Unary arithmetic operators *)
-	| UPlus e ->
-		print_string "+(";
-		expr_source2 level e;
-		print_string ")"
-	| UMinus e ->
-		print_string "-(";
-		expr_source2 level e;
-		print_string ")"
-
-	(* Binary arithmetic operators *)
-	| Plus		(e, f) -> binary "+" e f
-	| Minus		(e, f) -> binary "-" e f
-	| Times		(e, f) -> binary "*" e f
-	| Divide	(e, f) -> binary "/" e f
-
-	(* Comparison operators *)
-	| Equal			(e, f) -> binary "="  e f
-	| NotEqual		(e, f) -> binary "<>" e f
-	| Greater		(e, f) -> binary ">"  e f
-	| GreaterEqual	(e, f) -> binary ">=" e f
-	| Lower			(e, f) -> binary "<"  e f
-	| LowerEqual	(e, f) -> binary "<=" e f
-
-
-(* expr_source [int -> exp -> unit]
-   Prints a human-readable listing of a provided expression on stdout *)
-let expr_source level exp =
-	expr_source2 level exp;
-	print_newline ()
+	(* Comparisons *)
+	| E_Equal			(e, f) -> comp (=)  e f
+	| E_NotEqual		(e, f) -> comp (<>) e f
+	| E_Greater			(e, f) -> comp (>)  e f
+	| E_GreaterEqual	(e, f) -> comp (>=) e f
+	| E_Lower			(e, f) -> comp (<)  e f
+	| E_LowerEqual		(e, f) -> comp (<=) e f

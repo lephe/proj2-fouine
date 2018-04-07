@@ -26,6 +26,4 @@
 - Don't concatenate toplevel declaration lists with "@" in semantic actions of
   the parser
 
-- Prefix all expression nodes with "E_"
-
-- CLEAN UP ALL THIS, HMM, "MESS"
+- Better error messages, also review exception types

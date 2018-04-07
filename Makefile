@@ -10,7 +10,7 @@ all-native:
 	@ mv main.native $(bin-native)
 
 all-bytecode:
-	ocamlbuild -I src src/main.byte
+	ocamlbuild src/main.byte
 	@ mv main.byte $(bin-bytecode)
 
 test-all: all-native
@@ -24,6 +24,6 @@ test-ast: all-native
 	@mkdir -p $@
 
 clean:
-	ocamlbuild -clean
+	ocamlbuild -r -clean
 
 .PHONY: all all-native all-bytecode clean

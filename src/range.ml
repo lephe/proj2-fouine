@@ -1,16 +1,9 @@
 (*
-**	Util - Utility functions, independent from the core interpreter
+**	Range - Sections of the source code, for error diagnostics
 *)
 
-(* Open the Lexing module so that range's record type is fully qualified *)
 open Types
 open Lexing
-
-(*
-	Range objects
-	These objects are used to keep track of the file location of the tokens
-	and expressions for better error diagnoses.
-*)
 
 (* [private] *)
 let pos_empty : Lexing.position = {
@@ -20,36 +13,22 @@ let pos_empty : Lexing.position = {
 	pos_cnum	= 0;
 }
 (* A default value for the range type *)
-let range_empty = (pos_empty, pos_empty)
+let range_empty : range = (pos_empty, pos_empty)
 
-(* range_str [range -> str]
-   Provides a textual representation of the starting point of the range, on the
-   form "file:line:column" *)
-let range_str ((s, e): range) : string =
-	let cnum = s.pos_cnum - s.pos_bol + 1 in
-	let name = if s.pos_fname = "" then "<standard input>" else s.pos_fname in
-	Printf.sprintf "%s:%02d:%02d" name s.pos_lnum cnum
-
-(* range_merge [range -> range -> range]
-   Returns a new range object delimitating the shortest substring that contains
-   both (s1, e1) and (s2, e2).
-   This function assumes that (s1, e2) and (s2, e2) do not intersect. This is a
-   strong condition, but for the parser it's an evidence *)
-let range_merge ((s1, e1): range) ((s2, e2): range) : range =
+(* range_merge [range -> range -> range] *)
+let range_merge (s1, e1) (s2, e2) : range =
 	if s1.pos_cnum < s2.pos_cnum
 	then (s1, e2)
 	else (s2, e1)
 
 (* range_highlight [range -> out_channel -> unit]
-   Highlights a range within the source. The source script must be in a named
-   file, and this function brutally reopens and traverses the file.
    TODO: Save the source in a byte object in main; don't reopen the file *)
-let range_highlight (range: range) out =
+let range_highlight range out =
 	(* Check that the source is a file, otherwise do nothing *)
 	if (fst range).pos_fname = "" then () else
 	let (start, ende) = range in
 
-	(* Open the source and seek to the beginning of the last-higlighted line *)
+	(* Open the source and seek to the last-highlighted line *)
 	let fp = open_in start.pos_fname in
 	seek_in fp ende.pos_cnum;
 

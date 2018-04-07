@@ -1,5 +1,5 @@
 (*
-**	Parser - A Menhir-generated LR(1) parser for the fouine language
+**	Parser - A Menhir-generated LR(1) parser
 *)
 
 (* This is an m4 file. See menhir.sh for the details of how it is preprocessed
@@ -13,7 +13,7 @@ define(POS,($startpos, $endpos))
 
 %{
 open Types
-open Util
+open Range
 open Exceptions
 
 (* The syntax tree will just be an expression *)
@@ -26,9 +26,9 @@ type ast = expr
 **	parameter metadata (ie, when both the first and the last token of the
 **	rule are already ast).
 **
-**  The % operator is used below to affix trees with ranges, making expressions
-**  (see "types.ml" for details). I often write "r% tree" or "POS% tree" to
-**  keep the syntax light.
+**	The % operator is used below to affix trees with ranges, making expressions
+**	(see "types.ml" for details). I often write "r% tree" or "POS% tree" to
+**	keep the syntax light.
 *)
 
 let (%) range tree = { range = range; tree = tree }
@@ -36,21 +36,21 @@ let (%) range tree = { range = range; tree = tree }
 (* Make "fun args... ->" nodes by currying *)
 let rec make_fun r args e : ast = match args with
 	| [] -> e
-	| arg :: tl -> r% Function (arg, make_fun r tl e)
+	| arg :: tl -> r% E_Function (arg, make_fun r tl e)
 
 (* Make if-then nodes [range -> expr -> expr -> ast] *)
 let make_ifthen r e t : ast =
 	(* Set a default condition, unit, for the else clause *)
 	let else_clause = (snd r, snd r) % E_Unit
-	in r% If (e, t, else_clause)
+	in r% E_If (e, t, else_clause)
 
 (* Make unary operator nodes [range -> string -> ast -> ast] *)
 let make_unary r0 op e1 : ast =
 	let r = range_merge r0 e1.range in
 	r% match op with
-	| "+" -> UPlus e1
-	| "-" -> UMinus e1
-	| "!" -> Bang e1
+	| "+" -> E_UPlus e1
+	| "-" -> E_UMinus e1
+	| "!" -> E_Bang e1
 	| _ -> raise (InternalError
 		("The parser suddenly forgot what " ^ op ^ " means x_x\n"))
 
@@ -58,16 +58,16 @@ let make_unary r0 op e1 : ast =
 let make_binary e1 op e2 : ast =
 	let r = range_merge e1.range e2.range in
 	r% match op with
-	| "+"  -> Plus			(e1, e2)
-	| "-"  -> Minus			(e1, e2)
-	| "*"  -> Times			(e1, e2)
-	| "/"  -> Divide		(e1, e2)
-	| "="  -> Equal			(e1, e2)
-	| "<>" -> NotEqual		(e1, e2)
-	| ">"  -> Greater		(e1, e2)
-	| ">=" -> GreaterEqual	(e1, e2)
-	| "<"  -> Lower			(e1, e2)
-	| "<=" -> LowerEqual	(e1, e2)
+	| "+"  -> E_Plus			(e1, e2)
+	| "-"  -> E_Minus			(e1, e2)
+	| "*"  -> E_Times			(e1, e2)
+	| "/"  -> E_Divide			(e1, e2)
+	| "="  -> E_Equal			(e1, e2)
+	| "<>" -> E_NotEqual		(e1, e2)
+	| ">"  -> E_Greater			(e1, e2)
+	| ">=" -> E_GreaterEqual	(e1, e2)
+	| "<"  -> E_Lower			(e1, e2)
+	| "<=" -> E_LowerEqual		(e1, e2)
 	| _ -> raise (InternalError
 		("The parser suddenly forgot what " ^ op ^ " means x_x\n"))
 
@@ -121,9 +121,9 @@ let make_list_one r e : ast =
 
 /*
 **	Precedence relations
-**  We all know that %prec's are tricky and I've tried to keep them minimal. I
-**  I consider them acceptable where the OCaml parser uses them, and I document
-**  why I need them. Otherwise, there's an entry in my doc/bugs file.
+**	We all know that %prec's are tricky and I've tried to keep them minimal. I
+**	I consider them acceptable where the OCaml parser uses them, and I document
+**	why I need them. Otherwise, there's an entry in my doc/bugs file.
 */
 
 /* [below_SEMI] Used to make seq_expr greedy */
@@ -170,23 +170,23 @@ let make_list_one r e : ast =
 %nonassoc BEGIN INT BOOL NAME LPAR BANG LBRACK
 
 /* Our CST will be annotated with line and column numbers */
-%start <Types.decl list> toplevel
+%start <Types.statement list> toplevel
 /* The REPL shell mainly reads toplevel commands terminated by ";;" */
-%start <Types.decl list> repl
+%start <Types.statement list> repl
 
 /* The types help improve error messages from type inference */
-%type <Types.decl> toplevel_decl
+%type <Types.statement> toplevel_statement
 %type <Types.expr> expr_list
 
 %%
 
 /*
-**  Toplevel expressions
+**	Toplevel expressions
 */
 
 toplevel:
 	| SEMISEMI EOF | EOF				{ [] }
-	| e = seq_expr EOF					{ [D_Expr (POS, e)] }
+	| e = seq_expr EOF					{ [S_Expr (POS, e)] }
 
 	/* Allow using ";;" and omitting the "in" at the toplevel (OCaml syntax) */
 	| seq = toplevel_seq SEMISEMI p = toplevel { seq @ p }
@@ -194,30 +194,30 @@ toplevel:
 
 	/* Expressions before ";;" resolve to "let _ = expr;;" */
 	| e = seq_expr SEMISEMI p = toplevel
-		{ D_LetVal (e.range, P_Wildcard, e) :: p }
+		{ S_LetVal (e.range, P_Wildcard, e) :: p }
 
 toplevel_seq:
-	| s = nonempty_list(toplevel_decl)	{ s }
+	| s = nonempty_list(toplevel_statement) { s }
 
-/* Toplevel declarations include let bindings and type definitions */
-toplevel_decl:
+/* Toplevel statements include let bindings and type definitions */
+toplevel_statement:
 	/* Two flavours of let; see "expr" for more detail */
 	| LET recursive = boption(REC) pat = pattern EQ e = expr
-		{ D_LetVal (POS, pat, e) }
+		{ S_LetVal (POS, pat, e) }
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
 	  e = expr {
 		if not recursive
-		then D_LetVal (POS, P_Name n, make_fun POS args e)
-		else D_LetRec (POS, n, make_fun POS args e)
+		then S_LetVal (POS, P_Name n, make_fun POS args e)
+		else S_LetRec (POS, n, make_fun POS args e)
 	  }
-	/* OCaml-style type declarations (but not compatible with typing) */
+	/* OCaml-style type definitions (but not compatible with typing) */
 	| TYPE n = NAME EQ option(PIPE) hd = CTOR l = list(PIPE c = CTOR { c })
-		{ D_Type (POS, n, hd :: l) }
+		{ S_Type (POS, n, hd :: l) }
 
 /* The input of the REPL shell */
 repl:
 	| repl_terminator { [] }
-	| e = seq_expr repl_terminator { [D_Expr (POS, e)] }
+	| e = seq_expr repl_terminator { [S_Expr (POS, e)] }
 	| s = toplevel_seq repl_terminator { s }
 
 /* REPL command terminators */
@@ -226,7 +226,7 @@ repl_terminator:
 	| SEMISEMI { }
 
 /*
-**  General expressions
+**	General expressions
 */
 
 /* seq_expr is the largest expression nonterminal, the only that allows ";" */
@@ -261,20 +261,20 @@ expr:
 
 	/* Pattern matching */
 	| MATCH e = seq_expr WITH
-	  option(PIPE) mc = match_cases		{ POS% Match (e, mc) }
+	  option(PIPE) mc = match_cases		{ POS% E_Match (e, mc) }
 
 	/* Reference assignments */
-	| e = expr ASSIGN f = expr			{ POS% Assign (e, f) }
+	| e = expr ASSIGN f = expr			{ POS% E_Assign (e, f) }
 
 	/* Conditions - Can't use Menhir's option() here (AFAIK) because the two
 	   reductions must have a different priority */
 	| IF e = seq_expr THEN t = expr
-	  ELSE f = expr						{ POS% If (e, t, f) }
+	  ELSE f = expr						{ POS% E_If (e, t, f) }
 	| IF e = seq_expr THEN t = expr		{ make_ifthen POS e t }
 
 	/* Function applications, and, priority-wise, "ref" and constructors */
-	| e = expr	ae = atomic_expr 		{ POS% Call (e, ae) }
-	| REF		ae = atomic_expr 		{ POS% Ref ae }
+	| e = expr	ae = atomic_expr 		{ POS% E_Call (e, ae) }
+	| REF		ae = atomic_expr 		{ POS% E_Ref ae }
 	| c = CTOR	ae = atomic_expr 		{ POS% E_Ctor (c, ae) }
 
 	/* Function definitions */
@@ -338,7 +338,7 @@ expr_list:
 	| e = expr SEMI l = expr_list		{ make_list_cons POS e l }
 
 /*
-**  Match cases, for functional pleasure
+**	Match cases, for functional pleasure
 */
 
 /* I can't use Menhir's standard library's separated_nonempty_list() becauses
@@ -353,7 +353,7 @@ match_case:
 	| p = pattern ARROW e = expr		{ (p, e) }
 
 /*
-**  Binding patterns for use by let expressions and function definitions
+**	Binding patterns for use by let expressions and function definitions
 */
 
 pattern:

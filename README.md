@@ -1,5 +1,9 @@
 # Projet 2 : Fouine (Sébastien Michelland)
 
+Un peu trop de modules : bon ben "circular build" partout...
+
+---
+
 Originellement en binôme avec Sébastien Baumert, et puis finalement non.
 
 J'ai traité les parties débutant, intermédiaire et avancé, puis implémenté des
@@ -31,7 +35,7 @@ L'usage typique est avec un fichier, ou l'entrée standard :
 	# ./fouine <file>
 	# ./fouine -stdin
 
-Les options sont détailées sur `--help` ; grosso modo, `-stdin` lit sur
+Les options sont détaillées sur `--help` ; grosso modo, `-stdin` lit sur
 l'entrée standard, `-ast` affiche un AST similaire à `-debug`, et `-parse`
 arrête l'exécution après le passage du parser.
 

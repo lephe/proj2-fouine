@@ -166,8 +166,19 @@ envoyé).
   pour les définitions de types). Le shell démarre en mode interactif si aucun
   nom de fichier n'est indiqué et que `-stdin` n'est pas utilisé.
 
-  Le shell utilise le fameux ";;" pour terminer les commandes. Il est
-  absolument nécessaire pour éviter les end-of-stream conflicts que Menhir
-  prend la peine de signaler. Le problème survient quand la fin des commandes
-  est décidée par le token suivant, qui n'existe pas en interactif (le lire
-  sur l'entrée standard bloque le processus).
+  Le shell utilise ";;", ce qui est essentiel pour résoudre les end-of-stream
+  conflicts relevés par Menhir. Sans ";;", il faudrait lire un token de plus
+  pour décider que la commande est finie, ce qui est impossible sur stdin.
+  D'ailleurs, le shell fonctionne bien avec ledit.
+
+*[master 0c57472]*
+	Cleaner parser, Hindley-Milner type inference stub, simple shell.
+
+---
+
+* Réorganisé un certain désordre dans les sources ; finalement rédigé les
+  fichiers d'interfaces (.mli) des modules. Avec la peur panique des
+  dépendances circulaires d'OCaml, c'était pas gagné d'avance.
+
+* Document la nouvelle API dans doc/api. C'est une vue d'ensemble plus pratique
+  que d'ouvrir un à un tous les fichiers d'interface.

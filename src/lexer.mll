@@ -1,5 +1,5 @@
 (*
-**	Lexer - An ocamllex-generated lexer for the fouine language
+**	Lexer - An ocamllex-generated lexer
 *)
 
 {

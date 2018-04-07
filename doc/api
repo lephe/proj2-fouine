@@ -1,70 +1,109 @@
 #---
 #	This is a description of the interpreter's API, organized in modules.
-#	Because the .mli files are not hand-written, more symbols may be
-#	exported by the modules, but they will never be referred to.
-#	This listing rules.
+#	I finally decided to write my own interface files, but this listing
+#	still provides the best overview of the program's structure.
+#
+#	There are mode modules than I wished because OCaml has a very broad and
+#	unpractical notion of "circular build".
 #---
 
-# Complex type definitions are centralized here, leaving function
-# implementation to the other modules.
-Types
+Errors # Error messages and logs in terminal
+
+	errors_try()		# Execute function, report errors in terminal
+
+Exceptions # Exception types
+
+	MatchError		range, pattern, value
+	MultiBind		bool, range, StringSet.t
+	TypeError		range, string, string
+	NameError		range, string
+	InvalidOperator		string
+	ZeroDivision		range
+	TypeOverload		range, string
+	Error			range, string
+	InternalError		string
+
+Expr # Expression representation and evaluation
+
+	expr_free()		# Get the free variables
+	expr_eval()		# Evaluates an expression within an environment
+
+Interpreter # The higher-level interface for program execution
+
+	interpreter_start()	# Create a fresh execution environment
+	interpreter_exec()	# Evaluate a statement within an environment
+
+Lexer # An ocamllex-generated lexer
+
+	(automatically generated)
+
+Main # Command-line parsing and main flow for non-interactinve invocations
+
+	(no interface)
+
+Memory # Imperative-style, random-access memory for references
+
+	memory_store()		# Store value, return address
+	memory_get()		# Get pointed value
+	memory_update()		# Update pointed value
+
+Parser # A Menhir-generated LR(1) parser
+
+	(automatically generated)
+
+Pattern # Data patterns, for let, match, and function
+
+	pattern_free()		# Get bound variables
+	pattern_unify()		# Match pattern, unify terms, bind names
+	pattern_bind()		# Higher-level version of pattern_unify
+
+Range # Sections of the source code, for error diagnostics
+
+	range_empty		# An empty range object (placeholder)
+	range_merge()		# Get a larger range that covers arguments
+	range_highlight()	# Highlight a section of the source in terminal
+
+Repr # Textual representations of objects
+
+	repr_expr()		# Expr
+	repr_memory_addr()	# Memory
+	repr_pattern()		# Pattern
+	repr_range()		# Range. Uses format "file:line:col"
+	repr_value()		# Value
+	repr_statement()	# Interpreter
+	repr_program()		# Interpreter
+
+Shell # Interactive Read-Eval-Print Loop shell
+
+	shell_main()		# Do a REPL session
+
+Source # Re-interpretable representations of objects
+
+	source_expr()		# Expr
+	source_statement()	# Interpreter
+	source_program()	# Interpreter
+
+Types # Type definitions and functor-generated modules
+
+	module IntSet
+	module IntMap
+	module StringSet
+	module StringMap
+
 	type range
 	type pattern
-	type tree
+	type expr_tree
 	type expr
+	type decl
 	type value
 	type env
 	type memory
 	type memory_addr
 
-	module EnvMap
-	module StringSet
+Value # Concrete data types
 
-Eval
-	value_type()		# Value type as string
-	value_str()		# Get textual representation (without newline)
-	value_print()		# Print value to stdout (with newline)
+	value_type()		# Get type associated with value
 
-	eval()			# Evaluate an expression
+#---
 
-Exceptions
-	MatchError		(range, pattern, value)
-	TypeError		(range, string, string)
-	NameError		(range, string)
-	InvalidOperator		(string)
-	ZeroDivision		(range)
-	TypeOverload		(range, string)
-	Error			(range, string)
-	InternalError		(string)
-
-	exception_report()	# Execute function and catch exceptions *)
-
-Expr
-	expr_free()		# Get the free variables
-	expr_print()		# Print AST in terminal
-	expr_source()		# Print reconstituted "source" in terminal
-
-Memory
-	memory_addr_str()	# String representation of address
-	memory_create()		# Store value, create and return reference
-	memory_get()		# Get pointed value
-	memory_update()		# Update pointed value
-
-Pattern
-	pattern_free()		# Get bound variables
-	pattern_str()		# String representation of pattern
-	pattern_unify()		# Match pattern, unify terms, bind names
-
-Toplevel
-	top_new()		# Create a new toplevel environment
-	top_exec()		# Execute a single toplevel declaration
-
-	decl_print()		# Print declaration AST
-	decl_source()		# Print declaration source
-	decl_eval()		# Evaluate a single toplevel declaration
-
-Util
-	range_empty		# An empty range object (placeholder)
-	range_str()		# String representation "file:line:col"
-	range_merge()		# Get a larger range that covers arguments
-	range_highlight()	# Highlight a section of the source in terminal
+Typing
