@@ -6,6 +6,10 @@ open Types
 open Interpreter
 open Repr
 open Printf
+open Errors
+
+(* TODO: Remove this once typing is properly integrated *)
+open Typing
 
 (* Number of the currently-executed shell command [private] *)
 let shell_num = ref 0
@@ -14,7 +18,7 @@ let shell_num = ref 0
    Reads and parses a command from standard input *)
 let get_command () =
 	(* Start the lexer with the command number as file name *)
-	let input_name = "[" ^ string_of_int (!shell_num) ^ "]" in
+	let input_name = "" in (* "[" ^ string_of_int (!shell_num) ^ "]" in *)
 	let lexbuf = Lexing.from_channel stdin in
 	lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = input_name };
 
@@ -27,9 +31,9 @@ let get_command () =
 (* TODO: Use confid to decide the boolean in repr_value (detailed output) *)
 let notify event = match event with
 	| Ev_Result value ->
-		printf "- = %s\n" (repr_value value false)
+		printf "- = %s\n" (repr_value value true)
 	| Ev_Binding (name, value) ->
-		printf "%s = %s\n" name (repr_value value false)
+		printf "%s = %s\n" name (repr_value value true)
 
 (* shell_repl [config -> env -> env] [private]
    The promised Read-Eval-Print Loop. Returns the environment at the end of
@@ -41,13 +45,13 @@ let rec shell_repl conf env =
 
 	let stmts = get_command () in
 
-	(* execute_stmt [statement -> env -> env]
+	(* execute_stmt [env -> statement -> env]
 	   Executes a statement, handles the side-effects, and returns the
-	   resulting environment *)
-	let execute_stmt stmt env =
-		let (newenv, events) = interpreter_exec env stmt in
-		List.iter notify events;
-		newenv in
+	   resulting environment. On error, returns the untouched environment *)
+	let execute_stmt env stmt =
+		match errors_try (fun () -> interpreter_exec stmt env) with
+		| Some (newenv, events) -> List.iter notify events; newenv
+		| None -> env in
 
 	let newenv = List.fold_left execute_stmt env stmts in
 	if stmts = [] then env else shell_repl conf newenv
@@ -56,10 +60,9 @@ let rec shell_repl conf env =
    Starts an interactive REPL session. Returns when the user leaves the
    interpreter *)
 let shell_main conf =
+	(* typing_tests (); *)
+
 	print_string
 		"  This is an interactive Fouine shell. Type Ctrl-D to leave.\n\n";
-	let env = {
-		vars  = StringMap.empty;
-		types = StringMap.empty;
-	} in
+	let env = interpreter_start () in
 	let _ = shell_repl conf env in ()

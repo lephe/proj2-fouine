@@ -24,7 +24,7 @@ type ast = expr
 **	The following functions build the nodes of the tree. Some take a range
 **	object as parameter; it is omitted only when it can be deduced from the
 **	parameter metadata (ie, when both the first and the last token of the
-**	rule are already ast).
+**	rule are already ASTs).
 **
 **	The % operator is used below to affix trees with ranges, making expressions
 **	(see "types.ml" for details). I often write "r% tree" or "POS% tree" to
@@ -114,16 +114,16 @@ let make_list_one r e : ast =
 %token IF THEN ELSE
 %token FUN
 %token REF
-%token TYPE MATCH WITH
+%token TYPE TRY MATCH WITH
 
 /* Special end-of-file token for end-of-stream conflicts */
 %token EOF
 
 /*
 **	Precedence relations
-**	We all know that %prec's are tricky and I've tried to keep them minimal. I
-**	I consider them acceptable where the OCaml parser uses them, and I document
-**	why I need them. Otherwise, there's an entry in my doc/bugs file.
+**	We agree that %prec's are tricky and I've tried to keep them minimal. I
+**	consider them acceptable where the OCaml parser uses them. Otherwise,
+**	there's an entry in my doc/bugs file.
 */
 
 /* [below_SEMI] Used to make seq_expr greedy */
@@ -138,7 +138,8 @@ let make_list_one r e : ast =
 %right ASSIGN
 
 /* [below_PIPE] Used to make match_cases greedy (for nested matches). Can
-   probably be avoided (TODO) */
+   probably be avoided */
+/* TODO: parser: Get rid of the below_PIPE precedence level */
 %nonassoc below_PIPE
 %left PIPE
 
@@ -166,10 +167,10 @@ let make_list_one r e : ast =
 
 /* Tokens that introduce simple, "atomic" expressions have the highest
    priority because we don't want to break down an atomic expression. This
-   makes like "-f . 3" work because we want to shift 3 before reducing -f */
+   makes like "-f 3" work because we want to shift 3 before reducing -f */
 %nonassoc BEGIN INT BOOL NAME LPAR BANG LBRACK
 
-/* Our CST will be annotated with line and column numbers */
+/* Our CST will be flattened at the top level */
 %start <Types.statement list> toplevel
 /* The REPL shell mainly reads toplevel commands terminated by ";;" */
 %start <Types.statement list> repl
@@ -245,11 +246,11 @@ expr:
 	/* Let bindings - come in two flavours:
 	     let <pattern> = <expr> in <expr>
 	     let [rec] <function-name> <patterns...> = <expr> in <expr>
-	   Note that LetVal handles non-recursives function definitions as values;
+	   Note that LetVal handles non-recursive function definitions as values;
 	   semantic differences only arise when using let rec */
 
-	| LET boption(REC) pat = pattern EQ
-	  e = seq_expr IN f = seq_expr		{ POS% E_LetVal (pat, e, f) }
+	| LET boption(REC) pat = pattern EQ e = seq_expr IN f = seq_expr
+										{ POS% E_LetVal (pat, e, f) }
 
 	/* In function bindings, the we can only bind one name at a time */
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
@@ -260,16 +261,20 @@ expr:
 	  }
 
 	/* Pattern matching */
-	| MATCH e = seq_expr WITH
-	  option(PIPE) mc = match_cases		{ POS% E_Match (e, mc) }
+	| MATCH e = seq_expr WITH option(PIPE) mc = match_cases
+										{ POS% E_Match (e, mc) }
+
+	/* Try .. catch statements */
+	| TRY e = seq_expr WITH option(PIPE) mc = match_cases
+										{ POS% E_Try (e, mc) }
 
 	/* Reference assignments */
 	| e = expr ASSIGN f = expr			{ POS% E_Assign (e, f) }
 
-	/* Conditions - Can't use Menhir's option() here (AFAIK) because the two
+	/* Conditions - I can't use Menhir's option() here (AFAIK) because the two
 	   reductions must have a different priority */
-	| IF e = seq_expr THEN t = expr
-	  ELSE f = expr						{ POS% E_If (e, t, f) }
+	| IF e = seq_expr THEN t = expr ELSE f = expr
+										{ POS% E_If (e, t, f) }
 	| IF e = seq_expr THEN t = expr		{ make_ifthen POS e t }
 
 	/* Function applications, and, priority-wise, "ref" and constructors */
@@ -278,8 +283,8 @@ expr:
 	| c = CTOR	ae = atomic_expr 		{ POS% E_Ctor (c, ae) }
 
 	/* Function definitions */
-	| FUN pl = nonempty_list(pattern)
-	  ARROW e = seq_expr				{ make_fun POS pl e }
+	| FUN pl = nonempty_list(pattern) ARROW e = seq_expr
+										{ make_fun POS pl e }
 
 	/* Usual arithmetic operations */
 	| e = expr PLUS  f = expr			{ make_binary e "+" f }
@@ -316,7 +321,7 @@ expr_comma:
 	| ec = expr_comma COMMA g = expr	{ g :: ec }
 
 atomic_expr:
-	/* Literal integers or variable names, units */
+	/* Literal integers or variable names, unit */
 	| i = INT  						 	{ POS% E_Int i }
 	| b = BOOL  						{ POS% E_Bool b }
 	| n = NAME  						{ POS% E_Name n }
@@ -341,13 +346,13 @@ expr_list:
 **	Match cases, for functional pleasure
 */
 
-/* I can't use Menhir's standard library's separated_nonempty_list() becauses
+/* I can't use Menhir's standard library's separated_nonempty_list() because
    it's not inline and it "hides" the rule precedence, which is that of PIPE */
 match_cases:
 	/* Same hack to make the rule greedy - I lack time do it 100% properly */
 	| c = match_case %prec below_PIPE	{ [ c ] }
-	| c = match_case PIPE
-	  mc = match_cases					{ c :: mc }
+	| c = match_case PIPE mc = match_cases
+										{ c :: mc }
 
 match_case:
 	| p = pattern ARROW e = expr		{ (p, e) }
@@ -367,7 +372,7 @@ pattern:
 	| p = pattern CONS q = pattern		{ P_Ctor ("Cons", P_Tuple [p;q]) }
 
 atomic_pattern:
-	/* Variable names, wildcards, and literal values */
+	/* Variable names, wildcard, and literal values */
 	| n = NAME							{ P_Name n }
 	| UND								{ P_Wildcard }
 	| i = INT							{ P_Int i }
@@ -389,5 +394,5 @@ pattern_list:
 
 pattern_comma_list:
 	| p = pattern COMMA q = pattern		{ [q; p] }
-	| pcl = pattern_comma_list COMMA
-	  r = pattern						{ r :: pcl }
+	| pcl = pattern_comma_list COMMA r = pattern
+										{ r :: pcl }

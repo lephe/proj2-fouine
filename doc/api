@@ -53,14 +53,14 @@ Parser # A Menhir-generated LR(1) parser
 
 Pattern # Data patterns, for let, match, and function
 
-	pattern_free()		# Get bound variables
+	pattern_free()		# Get the set of bound variables
 	pattern_unify()		# Match pattern, unify terms, bind names
 	pattern_bind()		# Higher-level version of pattern_unify
 
 Range # Sections of the source code, for error diagnostics
 
 	range_empty		# An empty range object (placeholder)
-	range_merge()		# Get a larger range that covers arguments
+	range_merge()		# Make a larger range that covers arguments
 	range_highlight()	# Highlight a section of the source in terminal
 
 Repr # Textual representations of objects
@@ -100,10 +100,10 @@ Types # Type definitions and functor-generated modules
 	type memory
 	type memory_addr
 
+Typing # Type inference
+
+	(not merged with application yet)
+
 Value # Concrete data types
 
 	value_type()		# Get type associated with value
-
-#---
-
-Typing

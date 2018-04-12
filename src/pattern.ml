@@ -4,8 +4,6 @@
 
 open Types
 open Range
-
-(* TODO: Not new API *)
 open Exceptions
 
 (* pattern_free [pattern -> StringSet.t]

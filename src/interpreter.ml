@@ -12,9 +12,13 @@ open Exceptions
 (* interpreter_start [unit -> env]
    Creates a new execution environment for a program *)
 let interpreter_start () =
+	let list_type = [ ("Empty", "list"); ("Cons", "list") ] in
+	let add_type map (ctor, typename) = StringMap.add ctor typename map in
+
 	let env = {
 		vars  = StringMap.empty;
-		types = StringMap.empty;
+		types = List.fold_left add_type StringMap.empty list_type;
+		exchs = [];
 	}
 	in env
 
@@ -61,7 +65,7 @@ let interpreter_exec stmt env = match stmt with
 		 [Ev_Binding (n, value)])
 
 	(* Type definitions have their own kind of event *)
-	(* TODO: Create it *)
+	(* TODO: Create the type-definition event (requires structure in types) *)
 	| S_Type (r, name, ctors) ->
 		(* Check that constructors are not defined twice *)
 		let rec check ctor types =

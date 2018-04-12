@@ -48,6 +48,11 @@ exception ZeroDivision of range
    @arg		Name of the duplicate constructor *)
 exception TypeOverload of range * string
 
+(* UncaughtException - When an exception reaches the toplevel
+   @arg		Range of the raise expression
+   @arg		The expression object *)
+exception UncaughtException of range * value
+
 (* Error - A generic error (fallback)
    @arg		Location of the problem, may be range_empty
    @arg		A textual description of the error *)

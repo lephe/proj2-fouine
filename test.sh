@@ -5,7 +5,7 @@ tests_parsing="toplevel"
 # Output tests
 tests_output="calc let func rec ref tuple"
 # Zero tests
-tests_zero="adt list"
+tests_zero="adt list try"
 # Exceptions tests
 tests_except="except"
 
@@ -29,7 +29,7 @@ fopt=""
 # Enable syntax highlighting if program "highlight" is present
 highlight=$(which highlight 2> /dev/null)
 # Whether to pass Fouine's -debug output to OCaml
-bootstrap=
+replicate=
 
 function show_output()
 {
@@ -158,7 +158,7 @@ function except()
 }
 
 # Check that Fouine and OCaml on Fouine's debug return the same thing
-function bootstrap()
+function replicate()
 {
 	./fouine -parse "$fopt" "$1" -debug 2> /dev/null > /tmp/fouine.ml
 
@@ -172,10 +172,10 @@ function bootstrap()
 }
 
 # Parse command-line options
-#   -bootstrap triggers testing fouine's -debug output through ocaml
+#   -replicate triggers testing fouine's -debug output through ocaml
 #   Other options go directly to fouine for debug
 for arg; do case "$arg" in
-	"-bootstrap") bootstrap=true;;
+	"-replicate") replicate=true;;
 	*) fopt="$fopt $arg";;
 esac; done
 
@@ -185,7 +185,7 @@ echo -e "  ${y}PARSING${W}    - Fouine should parse iff OCaml does"
 echo -e "  ${b}OCAML${W}      - Compare Fouine output with that of OCaml"
 echo -e "  ${p}ZERO${W}       - Fouine should succeed and print 0"
 echo -e "  ${r}EXCEPTIONS${W} - Fouine should catch an exception and fail"
-echo -e "  ${W}BOOTSTRAP${W}  - Compare Fouine and Fouine -debug | OCaml"
+echo -e "  ${W}REPLICATE${W}  - Compare Fouine and Fouine -debug | OCaml"
 echo -e ""
 echo -e "Unit tests are divided into folders; each folder focuses on a"
 echo -e "specific language feature."
@@ -235,12 +235,12 @@ for folder in $tests_except; do
 	echo ""
 done
 
-# Bootstrap tests, if -bootstrap is on
-if [[ $bootstrap ]]; then
+# Replication tests, if -replicate is on
+if [[ $replicate ]]; then
 	for folder in $tests_output; do
-		echo -e "${W}BOOTSTRAP: $folder${w}"
+		echo -e "${W}REPLICATE: $folder${w}"
 		for file in tests/$folder/*; do
-			bootstrap "$file"
+			replicate "$file"
 			passed=$(($passed + 1 - $?))
 			performed=$(($performed + 1))
 		done

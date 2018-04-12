@@ -1,9 +1,8 @@
 - Typing?
 
-- Show closures in value_print
-
 - Analyze match cases; if typed, check for exhaustiveness and warn for unused
   match cases. For ADTs this is not too difficult:
+
   * Build a tree with all the cases, starting with the possible constructors
   * Mark all nodes that correspond to patterns that are caught
   * If a pattern is more specified than what's available in the tree (eg.
@@ -14,14 +13,15 @@
     case is never used
   * At the end of the process, traverse the tree and output a non-exhaustive
     warning for all non-marked nodes.
+
   For built-in types it is certainly possible to build a custom structure, fi.
   integers might go with a set of all explicitly-defined integers, or better,
   the largest explicitly-defined integer (the only other options being name and
   wildcard, and these catch everything. Besides, if none of them are used, then
   the match is obviously not exhaustive).
 
-- Do not create a nested structure from the toplevel script; the flat structure
-  is more natural (see for instance the REPL)
+  It is worth noting that this tree will also encode the required information
+  to check that the expression is well-typed.
 
 - Don't concatenate toplevel declaration lists with "@" in semantic actions of
   the parser

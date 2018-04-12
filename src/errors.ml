@@ -8,16 +8,17 @@ open Range
 open Printf
 open Exceptions
 
-(* errors_try [(unit -> 'a) -> bool]
+(* errors_try [(unit -> 'a) -> 'a option]
    Executes the provided function, catching possible errors and reporting them
-   on stderr. Returns true if an exception occurred, false otherwise *)
+   on stderr. Returns None if an exception occurred, the result of the function
+   call otherwise *)
 let errors_try func =
 	let pre range =
 		let r = repr_range range in
 		fprintf stderr "\x1b[1m%s: \x1b[31merror: \x1b[0m" r in
-	let ret = ref true in begin
+	let retval = ref None in
 
-	try let _ = func () in ret := false with
+	begin try retval := Some (func ()) with
 	| MatchError (r, Some pat, value) -> pre r;
 		fprintf stderr "cannot match value %s against '%s'\n"
 			(repr_value value false) (repr_pattern pat);
@@ -50,5 +51,5 @@ let errors_try func =
 	| InternalError str ->
 		fprintf stderr "error: an exception occurred x_x\n'%s'\n" str
 
-	end; !ret
+	end; flush stderr; !retval
 

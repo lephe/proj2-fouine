@@ -7,7 +7,7 @@
 *)
 
 (*
-	Functor-generated modules (sets and maps)
+**	Functor-generated modules (sets and maps)
 *)
 
 module StringSet = Set.Make(String)
@@ -24,7 +24,7 @@ module IntMap = Map.Make(struct
 end)
 
 (*
-	Command-line options
+**	Command-line options
 *)
 
 type config = {
@@ -41,7 +41,34 @@ type config = {
 }
 
 (*
-	Interpreter-related data types
+**	Typing-related definitions
+*)
+
+(* Type variables, represented here by integers *)
+type typevar = int
+
+(* Monotypes with type variables (called "types" in Damas & Milner's paper *)
+type mtype =
+	(* Type variables *)
+	| T_Var			of typevar
+	(* Usual base types *)
+	| T_Int
+	| T_Bool
+	| T_Unit
+	(* Type constructors *)
+	| T_Fun			of mtype * mtype
+	| T_Product		of int * mtype list
+	| T_List		of mtype
+	(* Named ADTs *)
+	| T_ADT			of string
+
+(* Polytypes, aka type schemes in the original paper *)
+type ptype = IntSet.t * mtype
+
+
+
+(*
+**	Interpreter-related data types
 *)
 
 (* range
@@ -89,8 +116,9 @@ type expr_tree =
 	| E_Name			of string
 	(* Type constructors *)
 	| E_Ctor			of string * expr
-	(* Pattern matching *)
+	(* Pattern matching and try .. match statements *)
 	| E_Match			of expr * (pattern * expr) list
+	| E_Try				of expr * (pattern * expr) list
 	(* Let bindings. The semantics of let-value and let-rec are so different
 	   that I just split them up. *)
 	| E_LetVal			of pattern * expr * expr
@@ -158,18 +186,20 @@ type value =
 	   which is recursively bound to the function (or None), their argument and
 	   their body. See "eval.ml" for recursion details *)
 	| V_Closure of value StringMap.t * string option * pattern * expr
-	(* A placeholder captured as a free variable by recursive functions
-	   mentioning themselves (this avoids name errors). I could do type
-	   inference for recursive functions by inferring the most general type for
-	   this placeholder and unifying it with the type of the body *)
-	| V_Rec
+
+(* exch
+   Exception handler for try statements. An single expression for each handled
+   exception type, but we also need to capture the environment in which the try
+   statement is executed, otherwise we won't unwind the stack at all! *)
+and exch = env * (pattern * expr) list
 
 (* env
    A set of name -> value mappings, as well as a set of name -> type mappings
    for Algebraic Data Types. *)
 and env = {
-	vars: value StringMap.t;
+	vars:  value StringMap.t;
 	types: string StringMap.t;
+	exchs: exch list;
 }
 
 (* memory
@@ -188,8 +218,8 @@ and memory_addr = int
 
 (* event
    Noticeable events that happen during program execution. These are emitted by
-   the Interpreter module and typically reported to the interactive shell *)
-(* TODO: Add type definitions! *)
+   the Interpreter module and typically reported by the interactive shell *)
+(* TODO: Add type definitions events! *)
 (* TODO: Add "exit function was called" event *)
 type event =
 	| Ev_Result of value

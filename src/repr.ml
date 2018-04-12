@@ -73,6 +73,11 @@ let rec repr_expr exp indent =
 		String.concat "" (List.map (fun (p, e) ->
 			space ^ "  " ^ recurse_n (repr_pattern p ^ " -> ") [e] 4
 		) cl)
+	| E_Try (e, cl) ->
+		recurse "try" [e] ^
+		String.concat "" (List.map (fun (p, e) ->
+			space ^ "  " ^ recurse_n (repr_pattern p ^ " -> ") [e] 4
+		) cl)
 
 	| E_LetVal (pat, e, f) ->
 		recurse ("let_in " ^ repr_pattern pat) [e; f]
@@ -116,29 +121,36 @@ let rec repr_expr exp indent =
 (* repr_value [value -> string]
    Builds a printable (not unambiguous) representation of a value *)
 let rec repr_value value verbose = match value with
+
 	(* Non-recursive values *)
 	| V_Int i		-> string_of_int i
 	| V_Bool b		-> if b then "true" else "false"
 	| V_Unit		-> "()"
+
+	(* TODO: repr_value: Use a better  syntax for lists *)
+	| V_Ctor ("Cons", V_Tuple [a; b])
+					-> repr_value a false ^ " :: " ^ repr_value b false
+	| V_Ctor ("Empty", _)
+					-> "[]"
 	| V_Ctor (c, e)	-> c ^ " " ^ repr_value e false
-	(* TODO: Get rid of the recursive placeholder, which doesn't have a type *)
-	| V_Rec			-> "<cycle placeholder>"
+
 	(* Recursive constructs *)
 	| V_Ref r		-> "ref " ^ repr_value (memory_get r) false
 	| V_Tuple l		->
 		let recurse v = repr_value v false in
 		"(" ^ String.concat ", " (List.map recurse l) ^ ")"
+
 	(* Closures can be fully displayed *)
 	| V_Closure (closure, recursive, pat, e) ->
 		if not verbose then "<fun>" else
 
 		let head = match recursive with
-		| None -> "<closure\n"
-		| Some n -> "<recursive closure '" ^ n ^ "'\n" in
+		| None -> "<closure>"
+		| Some n -> sprintf "<recursive closure '%s'>" n in
 
 		let make_one name value start =
-			start ^ "\n" ^ name ^ ": " ^ repr_value value false in
-		StringMap.fold make_one closure head ^ ">"
+			sprintf "%s\n  %s = %s" start name (repr_value value false) in
+		StringMap.fold make_one closure head
 
 
 

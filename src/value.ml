@@ -12,7 +12,6 @@ let rec value_type v env = match v with
 	| V_Unit		-> "unit"
 	| V_Ref _		-> "ref"
 	| V_Ctor (c, _)	-> StringMap.find c env.types
-	| V_Rec			-> "<recursion placeholder>"
 	| V_Closure (_, None, _, _) -> "<closure>"
 	| V_Closure (_, Some _,  _, _) -> "<recursive closure>"
 	| V_Tuple l ->

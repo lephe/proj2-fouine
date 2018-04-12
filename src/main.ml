@@ -83,11 +83,12 @@ let config_parse argv =
 
 
 let s_get_this_show_on_the_road =
+
 	(* Parse command_line options *)
 	let conf = config_parse Sys.argv in
 	if not conf._ok then exit 1;
 
-	(* Show help message if requested - then leave *)
+	(* Show the help message if --help is specified (then leave) *)
 	if conf.help then (print_string help_message; exit 0);
 
 	(* Start the REPL mode when -repl is specified *)
@@ -116,16 +117,11 @@ let s_get_this_show_on_the_road =
 	(* Stop now if -parse is on, we don't need to evaluate *)
 	if conf.parse then exit 0;
 
-	(* Evaluate the source tree. Exceptions are caught here (nowhere else) *)
-	let env_vars = StringMap.empty in
-	(* I define the Empty and Cons constructors by default, for lists *)
-	let defaults = [ ("Empty", "list"); ("Cons", "list") ] in
-	let env_types = List.fold_left (fun m (x, y) -> StringMap.add x y m)
-		StringMap.empty defaults in
+	(* Create a fresh execution environment *)
+	let env = interpreter_start () in
+	(* This function evaluates a single statement *)
+	let eval_one env stmt = fst (interpreter_exec stmt env) in
 
-	let failed = errors_try (fun () ->
-		let env = { vars = env_vars; types = env_types } in
-		let eval_one env stmt = fst (interpreter_exec stmt env) in
-		List.fold_left eval_one env program
-	) in
-	exit (if failed then 1 else 0)
+	(* Exceptions are caught here! *)
+	let final_env = errors_try (fun () -> List.fold_left eval_one env program)
+	in exit (if final_env = None then 1 else 0)

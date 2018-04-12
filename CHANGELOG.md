@@ -177,8 +177,35 @@ envoyé).
 ---
 
 * Réorganisé un certain désordre dans les sources ; finalement rédigé les
-  fichiers d'interfaces (.mli) des modules. Avec la peur panique des
-  dépendances circulaires d'OCaml, c'était pas gagné d'avance.
+  fichiers d'interfaces (.mli) des modules. Avec OCaml qui a une peur panique
+  des dépendances circulaires, c'était pas gagné d'avance.
 
-* Document la nouvelle API dans doc/api. C'est une vue d'ensemble plus pratique
-  que d'ouvrir un à un tous les fichiers d'interface.
+* Documenté la nouvelle API dans doc/api. C'est une vue d'ensemble plus
+  pratique que les fichiers d'interface. Dans les grandes lignes :
+  - *Eval* disparaît au profit de *Value* et *Expr*
+  - *Util* est renommé en *Range*
+  - *Toplevel* est renommé en *Interpreter*
+  - *Errors* est créé pour contenir errors_try que je ne pouvais pas mettre
+    dans *Exceptions* à cause de dépendances circulaires.
+
+*[master 18f8987]*
+	Reorganized all of the project's sources. Hopefully the last time I do
+	this.
+
+---
+
+* Supprimé l'artifice de récursion V_Rec.
+
+* Ajouté la gestion des erreurs dans le shell interactif ; les exceptions sont
+  maintenant rattrapées et reportées. Un travail reste à faire sur les noms des
+  sources et le surlignage des zones d'erreur.
+
+* Mis en place un affichage spécial pour les listes, "a :: b :: []". Il
+  faudrait utiliser la vraie syntaxe "[a; b]" mais ça ne peut être consistent
+  que si l'arbre des valeurs enforce un usage typable des constructeurs de
+  listes (pour éviter "1 :: 2" par exemple), et pour l'instant c'est pas prêt.
+
+* Implémenté des exceptions du genre try/catch. Comme il n'y a pas (encore) de
+  typage et que j'ai principalement repiqué du match, on peut pour l'instant
+  jeter n'importe quoi comme, même 2 ou [ (); fun x -> "a" ], ce qui est je
+  trouve assez fun.

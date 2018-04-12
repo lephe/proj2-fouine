@@ -25,6 +25,11 @@ and expr level exp =
 	let binary op e f =
 		sprintf "(%s) %s (%s)" (expr level e) op (expr level f) in
 
+	(* match_case [pattern * expr -> string] *)
+	let match_case (p, e) =
+		sprintf "\n%s| %s -> %s"
+		(space (level + 1)) (repr_pattern p) (expr (level + 1) e) in
+
 	match exp.tree with
 
 	(* Simple cases *)
@@ -35,11 +40,11 @@ and expr level exp =
 	| E_Ctor (ctor, e)	-> ctor ^ " " ^ expr level e
 
 	| E_Match (e, cl) ->
-		let match_case (p, e) =
-			sprintf "\n%s| %s -> %s"
-			(space (level + 1)) (repr_pattern p) (expr (level + 1) e) in
 		let match_cases = String.concat "" (List.map match_case cl) in
 		sprintf "(match %s with%s)" (expr level e) (match_cases)
+	| E_Try (e, cl) ->
+		let match_cases = String.concat "" (List.map match_case cl) in
+		sprintf "(try %s with%s)" (expr level e) (match_cases)
 
 	| E_LetVal (pat, e, f) ->
 		sprintf "let %s = %s in\n%s%s"

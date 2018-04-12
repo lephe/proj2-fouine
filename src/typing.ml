@@ -1,142 +1,54 @@
 (*
 **	Typing - Type inference
-**	This is a variant of Algorithm W by Damas and Milner.
+**	This is a variant of Algorithm W by Damas and Milner:
 **
 **	Luis Damas, Robin Milner. Principal type-schemes for functional programs
 **	https://dl.acm.org/citation.cfm?id=582176
+**
+**  See also https://en.wikipedia.org/wiki/Hindley–Milner_type_system.
 *)
 
-(*
-**	Type definitions
-*)
+open Types
+open Source
 
 exception WError of string
 
-module IntSet = Set.Make(struct
-	type t = int
-	let compare = Pervasives.compare
-end)
-
-module IntMap = Map.Make(struct
-	type t = int
-	let compare = Pervasives.compare
-end)
-
-module StringMap = Map.Make(String)
-
-type exp =
-	| E_Int of int
-	| E_Bool of bool
-	| E_Unit
-	| E_Var of string
-	| E_Fun of string * exp
-	| E_Call of exp * exp
-	| E_Pair of exp * exp
-	| E_Let of string * exp * exp
-
-(* Monotypes with type variables (called "types" in the original paper) *)
-type mtype =
-	(* Usual base types *)
-	| T_Int
-	| T_Bool
-	| T_Unit
-	(* Type constructors *)
-	| T_Fun of mtype * mtype
-	| T_Product of int * mtype list
-	| T_List of mtype
-	(* Named ADTs *)
-	| T_ADT of string
-	(* Type variables *)
-	| T_Var of int
-
-(* Polytypes, aka type schemes in the original paper *)
-type ptype = IntSet.t * mtype
-
-(* Type variables, represented here by integers *)
-type typevar = int
-
 (* Environments (sets of assumptions). Environments map type variables to
    monotypes in the union-find structure *)
-type env = typevar StringMap.t
+type typeenv = typevar StringMap.t
 
 (*
-**	Dummy utilities
+**	Dummy utilities (these will disappear when I merge the module)
 *)
 
-(* print_greek [id -> unit]
-   Prints a greek letter (0-13) on stdout, assuming utf-8 output *)
-let print_greek (id: int) =
-	if id > 14 then print_int id else
-	let bytes = Bytes.make 2 (Char.chr 0xce) in
-	Bytes.set bytes 1 (Char.chr (0xb1 + id));
-	print_string (Bytes.to_string bytes)
+(* repr_mtype [mtype -> string] *)
+let rec repr_mtype t = match t with
+	| T_Int		-> "int"
+	| T_Bool	-> "bool"
+	| T_Unit	-> "unit"
+	| T_ADT s	-> s
+	| T_Var v
+		-> Printf.sprintf "%c" (Char.chr (v + 97))
+	| T_Fun (t1, t2)
+		-> Printf.sprintf "%s -> %s" (repr_mtype t1) (repr_mtype t2)
+	| T_Product (_, tl)
+		-> String.concat " * " (List.map repr_mtype tl)
+	| T_List t'
+		-> repr_mtype t' ^ " list"
 
-(* print_mtype [mtype -> unit] *)
-let rec print_mtype t = match t with
-	| T_Int		-> print_string "int"
-	| T_Bool	-> print_string "bool"
-	| T_Unit	-> print_string "unit"
-	| T_Var v	-> print_greek v
-	| T_Fun (t1, t2) ->
-		print_string "(";
-		print_mtype t1;
-		print_string " -> ";
-		print_mtype t2;
-		print_string ")"
-	| T_Product (n, tl) ->
-		print_mtype (List.hd tl);
-		List.iter (fun x -> print_string " * "; print_mtype x) (List.tl tl)
-	| T_List t' ->
-		print_mtype t';
-		print_string " list"
-	| T_ADT s ->
-		print_string "s"
-
-(* print_ptype [ptype -> unit] *)
-let print_ptype (gen, t) =
-	if gen <> IntSet.empty then begin
-		print_string "∀";
-		IntSet.iter (fun v -> print_string " "; print_greek v) gen;
-		print_string ". "
-	end;
-	print_mtype t
-
-(* print_exp [exp -> unit] *)
-let rec print_exp e = match e with
-	| E_Int i	-> print_int i
-	| E_Bool b	-> print_string (if b then "true" else "false")
-	| E_Unit	-> print_string "()"
-	| E_Var n	-> print_string n
-	| E_Fun (n, f) ->
-		print_string "(fun ";
-		print_string n;
-		print_string " -> ";
-		print_exp f;
-		print_string ")"
-	| E_Call (f, g) ->
-		print_string "(";
-		print_exp f;
-		print_string " ";
-		print_exp g;
-		print_string ")"
-	| E_Pair (f, g) ->
-		print_string "(";
-		print_exp f;
-		print_string ", ";
-		print_exp g;
-		print_string ")"
-	| E_Let (n, f, g) ->
-		print_string ("(let " ^ n ^ " = ");
-		print_exp f;
-		print_string " in ";
-		print_exp g;
-		print_string ")"
+(* repr_ptype [ptype -> string] *)
+let repr_ptype (gen, t) =
+	(if gen <> IntSet.empty then
+		let varname v acc = acc ^ Printf.sprintf " %c" (Char.chr (v + 97)) in
+		IntSet.fold varname gen "∀" ^ ". "
+	else "")
+	^ repr_mtype t
 
 (* print_env [env -> unit] *)
 let print_env env =
 	StringMap.iter (fun key u ->
 		print_string (key ^ " : ");
-		print_ptype u;
+		print_string (repr_ptype u);
 		print_newline ()
 	) env
 
@@ -173,21 +85,21 @@ let uf_register var =
 	!uf_data.(var) <- UF_Null
 
 (* uf_find [typevar -> mtype]
-   Returns the monotype associated with a type variable, or itself if it is
-   still unresolved *)
+   Returns the monotype associated with a type variable, or the type variable
+   itself if it is still "unresolved" *)
 let rec uf_find var = match !uf_data.(var) with
 	| UF_Null -> T_Var var
 	| UF_Type t -> t
 	| UF_Link v -> let t = uf_find v in !uf_data.(var) <- UF_Type t; t
 
-(* uf_set [typevar -> mtype -> unit]
+(* uf_resolve [typevar -> mtype -> unit]
    Directly assign a monotype to a type variable *)
-let uf_set var t =
+let uf_resolve var t =
 	!uf_data.(var) <- UF_Type t
 
 (* uf_union [typevar -> typevar -> unit]
-   Perform the union of two type variables' classes. In a typical usage one of
-   them at least should be unresolved *)
+   Perform the union of two type variables' classes. In a typical use one of
+   them (at least) will be "unresolved" *)
 let uf_union v1 v2 =
 	let x, y = if !uf_data.(v2) = UF_Null then v2, v1 else v1, v2 in
 	!uf_data.(x) <- UF_Link y
@@ -205,8 +117,8 @@ let typevar_new () =
 **	Algorithm W
 *)
 
-(* The fixed-point combinator *)
-let fix = IntSet.of_list [0], T_Fun (T_Fun (T_Var 0, T_Var 0), T_Var 0)
+(* The fixed-point combinator - not used yet *)
+let fix = IntSet.of_list [0; 1], T_Fun (T_Fun (T_Var 0, T_Var 1), T_Var 0)
 
 (* ftv_mtype [mptype -> IntSet.t]
    Returns the set of free type variables of a monotype *)
@@ -237,28 +149,33 @@ let ftv_env env =
    Unifies t with u, editing the union-find structure as a side-effect to
    reflect the resolution of type variables *)
 let rec unify t u =
-(*	print_string "--- Unifying ";
-	print_mtype t;
-	print_string " and ";
-	print_mtype u;
-	print_string " ---\n"; *)
+(*	Printf.printf "--- Unifying %s and %s ---\n" (repr_mtype t) (repr_mtype u);
+*)
 	match t, u with
+
+	(* Bases case s*)
 	| T_Int, T_Int
 	| T_Bool, T_Bool
 	| T_Unit, T_Unit
 		-> ()
+	| T_ADT n, T_ADT m when n = m
+		-> ()
+
+	(* Recursive cases *)
 	| T_Fun (t1, t2), T_Fun (u1, u2)
 		-> unify t1 u1; unify t2 u2
 	| T_Product (n1, tl), T_Product (n2, ul) when n1 = n2
 		-> List.iter (fun (x, y) -> unify x y) (List.combine tl ul)
 	| T_List t', T_List u'
 		-> unify t' u'
-	| T_ADT n, T_ADT m when n = m
-		-> ()
+
+	(* Variables : unite if both sides are variables, otherwise resolve *)
 	| T_Var v1, T_Var v2
 		-> uf_union v1 v2
 	| T_Var v, other | other, T_Var v
-		-> uf_set v other
+		-> uf_resolve v other
+
+	(* Of course reject everything else *)
 	| _ -> raise (WError "unify failed")
 
 (* instance [ptype -> mtype]
@@ -284,21 +201,22 @@ let instance (gen, t) =
 			-> T_Var (if IntMap.mem v map then IntMap.find v map else v)
 	in sub map t
 
-(* closure [env -> mtype -> ptype]
-   Returns the closure of t in environment env *)
-let closure env t =
+(* generalize [env -> mtype -> ptype]
+   Return the most generalized polytype of t in environment env *)
+let generalize env t =
 	let generics = IntSet.diff (ftv_mtype t) (ftv_env env) in
 	(generics, t)
 
-let rec w env exp = match exp with
+let rec w env exp = match exp.tree with
 	| E_Int _	-> T_Int
 	| E_Bool _	-> T_Bool
 	| E_Unit	-> T_Unit
-	| E_Var v	->
+	| E_Name v	->
 		begin try let u = StringMap.find v env in instance u with
 		| Not_found -> T_Var (typevar_new ())
 		end
-	| E_Fun (v, f) ->
+	(* TODO: Extend functions to more complicated patterns *)
+	| E_Function (P_Name v, f) ->
 		let argtype = T_Var (typevar_new ()) in
 		let env' = StringMap.add v (IntSet.empty, argtype) env in
 		let rettype = w env' f in
@@ -315,11 +233,12 @@ let rec w env exp = match exp with
 		| _ -> t1 in
 		unify u0 (T_Fun (u1, rettype));
 		rettype
-	| E_Pair (f, g) ->
-		T_Product (2, [w env f; w env g])
-	| E_Let (n, f, g) ->
+	| E_Tuple el ->
+		T_Product (List.length el, List.map (w env) el)
+	(* TODO: Extend let-value to more complicated patterns *)
+	| E_LetVal (P_Name n, f, g) ->
 		let t = w env f in
-		let u = closure env t in
+		let u = generalize env t in
 		w (StringMap.add n u env) g
 
 (* and w env exp =
@@ -329,7 +248,7 @@ let rec w env exp = match exp with
 	print_env env;
 	let u = wrap env exp in
 	print_string ">>> ";
-	print_mtype (match u with T_Var v -> uf_find v | _ -> u);
+	print_string (repr_mtype (match u with T_Var v -> uf_find v | _ -> u));
 	print_newline ();
 	u
 *)
@@ -347,55 +266,69 @@ let rec rewrite t = match t with
 
 let testcase (env, exp) =
 	print_string "\n# \x1b[34m";
-	print_exp exp;
+	print_string (source_expr exp 0);
 	print_string "\x1b[0m\n";
 
 	typevar_source := 0;
 	let t0 = w env exp in
 	let t = rewrite t0 in
-	let u = match exp with
-	| E_Fun _ | E_Let (_, E_Fun _, _) -> closure env t
+	let u = match exp.tree with
+	(* TODO - Care about this when introducing more complicated patterns *)
+	| E_Function _
+	| E_LetVal (P_Name _, { tree = E_Function _ }, _) -> generalize env t
 	| _ -> (IntSet.empty, t) in
 
 	print_env env;
 	print_string "\x1b[33m";
-	print_ptype u;
+	print_string (repr_ptype u);
 	print_string "\x1b[0m\n"
 
-let _ =
+open Range
+
+let r = range_empty
+let (%) r t = { range = r; tree = t }
+
+let typing_tests () =
 	List.iter (fun p ->
 		try testcase p with
 		| WError str -> print_string ("error: " ^ str ^ "\n"))
 	[
 		(StringMap.empty,
-		 E_Int 1);
+		 r% E_Int 1);
 
 		(StringMap.empty,
-		 E_Fun ("x", E_Var "x"));
+		 r% E_Function (P_Name "x", r% E_Name "x"));
 
 		(StringMap.empty,
-		 E_Fun ("x", E_Fun ("y", E_Var "x")));
+		 r% E_Function (P_Name "x", r% E_Function (P_Name "y", r% E_Name "x"))
+		);
 
 		(StringMap.empty,
-		 E_Fun ("f", E_Fun ("x", E_Call (E_Var "f", E_Var "x"))));
+		 r% E_Function (P_Name "f",
+			r% E_Function (P_Name "x",
+				r% E_Call (r% E_Name "f", r% E_Name "x")
+		)));
 
 		(StringMap.empty,
-		 E_Call (E_Fun ("x", E_Var "x"), E_Fun ("x", E_Var "x")));
+		 r% E_Call(
+			r% E_Function (P_Name "x", r% E_Name "x"),
+			r% E_Function (P_Name "x", r% E_Name "x")
+		));
 
 		(StringMap.singleton "f" (IntSet.empty, T_Fun (T_Int, T_Int)),
-		 E_Call (E_Var "f", E_Var "x"));
+		 r% E_Call (r% E_Name "f", r% E_Name "x"));
 
 		(StringMap.empty,
-		 E_Fun ("f", E_Pair(
-			E_Call (E_Var "f", E_Int 0),
-			E_Call (E_Var "f", E_Bool true)
-		)));
+		 r% E_Function (P_Name "f", r% E_Tuple [
+			r% E_Call (r% E_Name "f", r% E_Int 0);
+			r% E_Call (r% E_Name "f", r% E_Bool true)
+		]));
 
 		(StringMap.empty,
-		 E_Let ("f",
-			E_Fun ("x", E_Var "x"),
-		E_Pair (
-			E_Call (E_Var "f", E_Int 0),
-			E_Call (E_Var "f", E_Bool true)
-		)));
+		 r% E_LetVal (P_Name "f",
+			r% E_Function (P_Name "x", r% E_Name "x"),
+		r% E_Tuple [
+			r% E_Call (r% E_Name "f", r% E_Int 0);
+			r% E_Call (r% E_Name "f", r% E_Bool true)
+		]));
 	]

@@ -21,53 +21,54 @@ rule main = parse
 	| "(*" { comment_depth := 1; comment lexbuf; main lexbuf }
 
 	(* Punctuation *)
-	| '('  { LPAR }
-	| ')'  { RPAR }
-	| ';'  { SEMI }
-	| ";;" { SEMISEMI }
-	| "->" { ARROW }
-	| '_'  { UND }
-	| ":=" { ASSIGN }
-	| '!'  { BANG }
-	| ','  { COMMA }
-	| '|'  { PIPE }
-	| '['  { LBRACK }
-	| ']'  { RBRACK }
-	| "::" { CONS }
+	| '('	{ LPAR }
+	| ')'	{ RPAR }
+	| ';'	{ SEMI }
+	| ";;"	{ SEMISEMI }
+	| "->"	{ ARROW }
+	| '_'	{ UND }
+	| ":="	{ ASSIGN }
+	| '!'	{ BANG }
+	| ','	{ COMMA }
+	| '|'	{ PIPE }
+	| '['	{ LBRACK }
+	| ']'	{ RBRACK }
+	| "::"	{ CONS }
 
 	(* Operators *)
-	| '+'  { PLUS }
-	| '-'  { MINUS }
-	| '*'  { TIMES }
-	| '/'  { DIV }
-	| '='  { EQ }
-	| "<>" { NE }
-	| '<'  { LT }
-	| '>'  { GT }
-	| "<=" { LE }
-	| ">=" { GE }
+	| '+'	{ PLUS }
+	| '-'	{ MINUS }
+	| '*'	{ TIMES }
+	| '/'	{ DIV }
+	| '='	{ EQ }
+	| "<>"	{ NE }
+	| '<'	{ LT }
+	| '>'	{ GT }
+	| "<="	{ LE }
+	| ">="	{ GE }
 
 	(* Operator-like things that should not be broken up!
 	   This construct imitates OCaml's user-defined operators such as "1 ++ 2".
 	   I don't support user-defined operators, but I still need to detect them
-	   because they could accidently be parsed in a wrong way, such as "--2"
+	   because they could accidentally be parsed in a wrong way, such as "--2"
 	   being read as "-(-(2))" *)
 	| ['+' '-' '!'] ['+' '-' '!']+ as op { OPERATOR op }
 
 	(* Keywords *)
-	| "let"   { LET }
-	| "rec"   { REC }
-	| "in"    { IN }
-	| "begin" { BEGIN }
-	| "end"   { END }
-	| "if"    { IF }
-	| "then"  { THEN }
-	| "else"  { ELSE }
-	| "fun"   { FUN }
-	| "ref"   { REF }
-	| "type"  { TYPE }
-	| "match" { MATCH }
-	| "with"  { WITH }
+	| "begin"	{ BEGIN }
+	| "else"	{ ELSE }
+	| "end"		{ END }
+	| "fun"		{ FUN }
+	| "if"		{ IF }
+	| "in"		{ IN }
+	| "let"		{ LET }
+	| "match"	{ MATCH }
+	| "rec"		{ REC }
+	| "ref"		{ REF }
+	| "then"	{ THEN }
+	| "try"		{ TRY }
+	| "type"	{ TYPE }
+	| "with"	{ WITH }
 
 	(* Literals - literal unit is "LPAR RPAR" and is built by the parser *)
 	| ['0' - '9']+ as s { INT (int_of_string s) }
@@ -82,7 +83,7 @@ rule main = parse
 	(* End Of File *)
 	| eof { EOF }
 
-(* Lexing rules for recursive Caml-style comments *)
+(* Lexing rules for recursive OCaml-style comments *)
 and comment = parse
 	| "(*" { incr comment_depth; comment lexbuf }
 	| "*)" {
