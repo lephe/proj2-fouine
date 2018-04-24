@@ -14,11 +14,9 @@ all-bytecode:
 	@ mv main.byte $(bin-bytecode)
 
 test-all: all-native
-	@ ./test.sh -replicate
+	@ ./test.sh -replicate -E -R -RE -ER
 test: all-native
 	@ ./test.sh
-test-ast: all-native
-	@ ./test.sh -ast
 
 %/:
 	@mkdir -p $@

@@ -28,16 +28,19 @@ end)
 *)
 
 type config = {
-	file:	string;		(* Specifies the file to execute *)
-	stdin:	bool;		(* Read from stdin (has precedence over <file> *)
-	shell:	bool;		(* Use the interactive REPL shell (fallback) *)
+	file:		string;		(* Specifies the file to execute *)
+	stdin:		bool;		(* Read from stdin (has precedence over <file> *)
+	shell:		bool;		(* Use the interactive REPL shell (fallback) *)
 
-	ast:	bool;		(* Display the AST before executing *)
-	debug:	bool;		(* Show program source, akin to -ast *)
-	parse:	bool;		(* Stop after parsing (for parsing-only tests) *)
+	ast:		bool;		(* Display the AST before executing *)
+	debug:		bool;		(* Show program source, akin to -ast *)
+	parse:		bool;		(* Stop after parsing (for parsing-only tests) *)
 
-	help:	bool;		(* Show help message and return *)
-	_ok:	bool;		(* Says whether the configuration is valid *)
+	transf:		char list;	(* Transformations to apply (ordered) *)
+	outcode:	bool;		(* Print transformed code *)
+
+	help:		bool;		(* Show help message and return *)
+	_ok:		bool;		(* Says whether the configuration is valid *)
 }
 
 (*
@@ -155,6 +158,10 @@ and expr = {
 	range: range;		(* Where the expression is located in the source *)
 }
 
+(* A shortcut to make an expression out of a range and a tree. Often used as
+   "r% tree" to hide the boring record truth *)
+let (%) range tree = { range = range; tree = tree }
+
 (* statement
    Top-level instructions at the root of the source tree (sequential) *)
 type statement =
@@ -186,6 +193,10 @@ type value =
 	   which is recursively bound to the function (or None), their argument and
 	   their body. See "eval.ml" for recursion details *)
 	| V_Closure of value StringMap.t * string option * pattern * expr
+	(* Built-in functions that rely on an OCaml implementation *)
+	| V_Builtin of (range -> value -> env -> value)
+	(* A memory - used only by programs that went under -R, -RE or -ER *)
+	| V_Memory of int * memory
 
 (* exch
    Exception handler for try statements. An single expression for each handled

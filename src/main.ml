@@ -5,6 +5,7 @@
 open Types
 open Errors
 
+open Transform
 open Interpreter
 open Shell
 
@@ -25,7 +26,13 @@ let help_message =
 "Debugging options:\n" ^
 "  -ast      After parsing, show an AST\n" ^
 "  -debug    After parsing, show regenerated sources (overrides -ast)\n" ^
-"  -parse    Stop after parsing; do not evaluate\n"
+"  -parse    Stop after parsing; do not evaluate\n" ^
+"\n" ^
+"Transformation options:\n" ^
+"  -E        Eliminate exceptions using continuations\n" ^
+"  -R        Eliminate imperative traits using memory-passing\n" ^
+"  -ER, -RE  Eliminate both (last first, first last)\n" ^
+"  -outcode  Print resulting code after transformation\n"
 
 (* Default configuration mode - run silently *)
 let default_conf = {
@@ -36,6 +43,9 @@ let default_conf = {
 	ast		= false;
 	debug	= false;
 	parse	= false;
+
+	transf	= [];
+	outcode	= false;
 
 	help	= false;
 	_ok		= true;
@@ -49,15 +59,22 @@ let config_parse argv =
 	let rec config_one i conf =
 		if i >= Array.length argv then conf else
 		let conf' = match argv.(i) with
-		| "--help"	-> { conf with help = true }
 
-		| "-stdin"	-> { conf with stdin = true }
+		| "--help"		-> { conf with help = true }
+		| "-stdin"		-> { conf with stdin = true }
 
-		| "-ast"	-> { conf with ast = true }
-		| "-debug"	-> { conf with debug = true }
-		| "-parse"	-> { conf with parse = true }
-		| filename	-> { conf with file = filename } in
-		config_one (i + 1) conf' in
+		| "-R"			-> { conf with transf = [ 'R' ] }
+		| "-E"			-> { conf with transf = [ 'E' ] }
+		| "-ER"			-> { conf with transf = [ 'R'; 'E' ] }
+		| "-RE"			-> { conf with transf = [ 'E'; 'R' ] }
+		| "-outcode"	-> { conf with outcode = true }
+
+		| "-ast"		-> { conf with ast = true }
+		| "-debug"		-> { conf with debug = true }
+		| "-parse"		-> { conf with parse = true }
+		| filename		-> { conf with file = filename }
+
+		in config_one (i + 1) conf' in
 
 	(* Perform some checks *)
 	let conf = ref (config_one 1 default_conf) in
@@ -114,11 +131,18 @@ let s_get_this_show_on_the_road =
 	if conf.debug then print_string (source_program program)
 	else if conf.ast then print_string (repr_program program);
 
+	(* Transform the program if any of -E, -R, -ER or -RE is specified *)
+	let program = transform program conf.transf in
+
+	(* Print the resulting source if -outcode is on *)
+	if conf.transf <> [] && conf.outcode
+	then print_string (source_program program);
+
 	(* Stop now if -parse is on, we don't need to evaluate *)
 	if conf.parse then exit 0;
 
 	(* Create a fresh execution environment *)
-	let env = interpreter_start () in
+	let env = interpreter_start conf.transf in
 	(* This function evaluates a single statement *)
 	let eval_one env stmt = fst (interpreter_exec stmt env) in
 

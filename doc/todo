@@ -15,13 +15,13 @@
     warning for all non-marked nodes.
 
   For built-in types it is certainly possible to build a custom structure, fi.
-  integers might go with a set of all explicitly-defined integers, or better,
-  the largest explicitly-defined integer (the only other options being name and
+  integers might go with a set of all explicitly-defined integers, or the
+  largest explicitly-defined integer (the only other options being name and
   wildcard, and these catch everything. Besides, if none of them are used, then
   the match is obviously not exhaustive).
 
   It is worth noting that this tree will also encode the required information
-  to check that the expression is well-typed.
+  to check that the expression is well-typed (polymorphism aside).
 
 - Don't concatenate toplevel declaration lists with "@" in semantic actions of
   the parser

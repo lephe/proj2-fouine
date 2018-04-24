@@ -209,3 +209,25 @@ envoyé).
   typage et que j'ai principalement repiqué du match, on peut pour l'instant
   jeter n'importe quoi comme, même 2 ou [ (); fun x -> "a" ], ce qui est je
   trouve assez fun.
+
+*[master 4ba1e23]*
+	Cleaned impurities; added continuation-style exception handling.
+
+---
+
+* Implémenté un système de built-ins via V_Builtin. Ce sont des fonctions
+  écrites en OCaml et chargées par défaut par le module *Interpreter* au début
+  de l'exécution.
+
+  Réécrit prInt et raise (plus subtil !) en built-ins. Tout cela pour préparer
+  alloc, read et write que je ne veux ajouter à l'environnement que si on a
+  effectué la transformation qui élimine les exceptions.
+
+* Étendu les capacités de récursion en autorisant `let rec` à recevoir toute
+  expression qui s'évalue en une clôture et pas seulement les expressions qui
+  sont syntaxiquement des fonctions.
+
+* Implémenté les transformations : impérative et par continuations. Il y a des
+  builtins spécifiques qui s'activent sur -R : "read", "write" et "alloc". Tout
+  cela se passe dans le module *Transform*; les builtins sont dans
+  *Interpreter*.

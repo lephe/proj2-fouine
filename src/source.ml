@@ -37,7 +37,7 @@ and expr level exp =
 	| E_Bool b			-> if b then "true" else "false"
 	| E_Unit			-> "()"
 	| E_Name n			-> n
-	| E_Ctor (ctor, e)	-> ctor ^ " " ^ expr level e
+	| E_Ctor (ctor, e)	-> ctor ^ " (" ^ expr level e ^ ")"
 
 	| E_Match (e, cl) ->
 		let match_cases = String.concat "" (List.map match_case cl) in

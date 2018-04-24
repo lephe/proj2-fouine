@@ -26,12 +26,9 @@ type ast = expr
 **	parameter metadata (ie, when both the first and the last token of the
 **	rule are already ASTs).
 **
-**	The % operator is used below to affix trees with ranges, making expressions
-**	(see "types.ml" for details). I often write "r% tree" or "POS% tree" to
-**	keep the syntax light.
+**	The % operator from the Types module is also used heavily. I often write
+**	"r% tree" or "POS% tree" to affix a tree with its range.
 *)
-
-let (%) range tree = { range = range; tree = tree }
 
 (* Make "fun args... ->" nodes by currying *)
 let rec make_fun r args e : ast = match args with

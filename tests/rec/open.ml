@@ -10,4 +10,4 @@ let f cont x =
 let rec fibonacci x = f fibonacci x
 ;;
 
-prInt (fibonacci 10)
+prInt (fibonacci 5)

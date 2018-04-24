@@ -7,8 +7,10 @@
 open Types
 
 (* interpreter_start
-   Creates a new execution environment for a program *)
-val interpreter_start : unit -> env
+   Creates a new execution environment for a program. The base environment
+   depends on the transformations applied on the source code, which may only be
+   ['R'], ['E'], ['R';'E'] or ['E';'R'] *)
+val interpreter_start : char list -> env
 
 (* interpreter_exec
    Executes a statement and returns the updated environment along with a list

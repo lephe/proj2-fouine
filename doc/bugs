@@ -1,2 +1,0 @@
-- Undeeded %prec in pattern matching rules.
-- prInt cannot be used in closures.

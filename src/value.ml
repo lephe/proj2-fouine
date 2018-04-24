@@ -17,3 +17,6 @@ let rec value_type v env = match v with
 	| V_Tuple l ->
 		let f v = value_type v env in
 		"(" ^ String.concat " * " (List.map f l) ^ ")"
+	(* TODO: value_type: Manually specify the type of built-in functions *)
+	| V_Builtin f	-> "<builtin>"
+	| V_Memory (_,m)-> "<builtin memory>"

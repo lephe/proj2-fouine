@@ -8,16 +8,99 @@ open Types
 open Expr
 open Pattern
 open Exceptions
+open Value
+open Range
 
-(* interpreter_start [unit -> env]
-   Creates a new execution environment for a program *)
-let interpreter_start () =
-	let list_type = [ ("Empty", "list"); ("Cons", "list") ] in
-	let add_type map (ctor, typename) = StringMap.add ctor typename map in
+(*
+**	Built-in functions
+**	All builtins have type range -> value -> env -> value as extensions of
+**	eval, and take care of unpacking. The range parameter allows them to raise
+**	exceptions.
+*)
+
+(* builtin_prInt [range -> value -> env -> value] [private] *)
+let builtin_prInt r value env = match value with
+	| V_Int i -> Printf.printf "%d\n" i; V_Int i
+	| v -> raise (TypeError (r, "int", value_type v env))
+
+(* builtin_raise [range -> value -> env -> value] [private] *)
+let builtin_raise r value env =
+	(* Unfold all patterns until a suitable exception handler is found. We have
+	   a list (nested try stack) of lists (patterns of a single try) *)
+	let rec try_handlers handlers v = match handlers with
+		(* If all the handlers have been unwound, call the toplevel *)
+		| [] -> raise (UncaughtException (r, v))
+		(* Unwind the try stack further *)
+		| (env, []) :: other_trys -> try_handlers other_trys v
+		(* Try to match the given pattern against the thrown value *)
+		| (local_env, (p, f) :: tl) :: other_trys ->
+			(* Use the environment where try is being run - this is crucial! *)
+			try let newenv = pattern_bind p v local_env in
+			(* There! We completely drop the continuation and use expr_eval *)
+			expr_eval f newenv with
+			| MultiBind (b, _, set) -> raise (MultiBind (b, r, set))
+			| MatchError _ -> try_handlers ((local_env, tl) :: other_trys) v
+
+	in try_handlers env.exchs value
+
+(* builtin_alloc [range -> value -> env -> value] [private] *)
+let builtin_alloc r value env = match value with
+	| V_Tuple [V_Memory (addr, m); v] ->
+		Hashtbl.add m addr v;
+		V_Tuple [V_Ref addr; V_Memory (addr + 1, m)]
+	| v -> raise (TypeError (r, "<builtin memory> * 'a", value_type v env))
+
+(* builtin_read [range -> value -> env -> value] [private] *)
+let builtin_read r value env = match value with
+	| V_Tuple [V_Memory (_, m); V_Ref addr] -> Hashtbl.find m addr
+	| v -> raise (TypeError (r, "<builtin memory> * ref", value_type v env))
+
+(* builtin_write [range -> value -> env -> value] [private] *)
+let builtin_write r value env = match value with
+	| V_Tuple [V_Memory (a, m); V_Ref addr; v] ->
+		Hashtbl.replace m addr v; V_Memory (a, m)
+	| v -> raise (TypeError (r,"<builtin memory> * ref * 'a",value_type v env))
+
+(*
+**	Interpreter core
+*)
+
+(* interpreter_start [char list -> env]
+   Creates a new execution environment for a program. The base environment
+   depends on the transformations applied on the source code, which may only be
+   ['R'], ['E'], ['R';'E'] or ['E';'R'] *)
+let interpreter_start tr_list =
+	let add map (key, value) = StringMap.add key value map in
+
+	(* Memory used by imperative programs *)
+	let s = V_Memory (0, Hashtbl.create 100) in
+
+	(* Other builtins that are specific to transformed programs *)
+	let tr_specific = match tr_list with
+	| []			-> []
+	| ['R']			-> [ ("s", s) ]
+	| ['E']			-> []
+	| ['R'; 'E']	-> [ ("_s", s) ]
+	| ['E'; 'R']	-> [ ("s", s) ]
+	| _ -> raise (InternalError "interpreter_start: unknown transformation") in
+
+	let list_type = [
+		("Empty",	"list");
+		("Cons",	"list");
+		("E",		"exn");
+	] in
+
+	let builtins  = [
+		("prInt", V_Builtin builtin_prInt);
+		("raise", V_Builtin builtin_raise);
+		("alloc", V_Builtin builtin_alloc);
+		("read",  V_Builtin builtin_read);
+		("write", V_Builtin builtin_write);
+	] in
 
 	let env = {
-		vars  = StringMap.empty;
-		types = List.fold_left add_type StringMap.empty list_type;
+		vars  = List.fold_left add StringMap.empty (builtins @ tr_specific);
+		types = List.fold_left add StringMap.empty list_type;
 		exchs = [];
 	}
 	in env

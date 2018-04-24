@@ -30,6 +30,8 @@ fopt=""
 highlight=$(which highlight 2> /dev/null)
 # Whether to pass Fouine's -debug output to OCaml
 replicate=
+# Transformations to test
+transf=
 
 function show_output()
 {
@@ -171,11 +173,41 @@ function replicate()
 	compare "$1" "/tmp/fouine.ml"
 }
 
+# Test transformations
+function transform()
+{
+	out_transf=$(./fouine "$fopt" "$1" "$2")
+	ret_transf="$?"
+
+	out_fouine=$(./fouine "$fopt" "$2")
+	ret_fouine="$?"
+
+	if [[ $out_transf == $out_fouine && $ret_transf == 0
+		&& $ret_fouine == 0 ]]; then
+		echo -e "${g}●${w} $2"
+		return 0
+	fi
+
+	echo -e "${r}●${w} $2"
+	show_output "Transformed program" "$out_transf"
+	show_output "Fouine" "$out_fouine"
+	show_input "$2"
+	echo ""
+
+	return 1
+}
+
+
 # Parse command-line options
 #   -replicate triggers testing fouine's -debug output through ocaml
+#   -R, -E, -ER and -RE trigger testing the transformations
 #   Other options go directly to fouine for debug
 for arg; do case "$arg" in
 	"-replicate") replicate=true;;
+	"-R") transf="$transf -R";;
+	"-E") transf="$transf -E";;
+	"-ER") transf="$transf -ER";;
+	"-RE") transf="$transf -RE";;
 	*) fopt="$fopt $arg";;
 esac; done
 
@@ -186,6 +218,7 @@ echo -e "  ${b}OCAML${W}      - Compare Fouine output with that of OCaml"
 echo -e "  ${p}ZERO${W}       - Fouine should succeed and print 0"
 echo -e "  ${r}EXCEPTIONS${W} - Fouine should catch an exception and fail"
 echo -e "  ${W}REPLICATE${W}  - Compare Fouine and Fouine -debug | OCaml"
+echo -e "  ${W}TRANSF ...${W} - Compare original and transformed programs"
 echo -e ""
 echo -e "Unit tests are divided into folders; each folder focuses on a"
 echo -e "specific language feature."
@@ -247,6 +280,19 @@ if [[ $replicate ]]; then
 		echo ""
 	done
 fi
+
+# Transformation tests
+for tr in $transf; do
+	for folder in $tests_output $tests_zero; do
+		echo -e "${W}TRANSFORM $tr: $folder${w}"
+		for file in tests/$folder/*; do
+			transform "$tr" "$file"
+			passed=$(($passed + 1 - $?))
+			performed=$(($performed + 1))
+		done
+		echo ""
+	done
+done
 
 # Okay!
 echo "Done! Passed $passed/$performed tests."

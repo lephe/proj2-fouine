@@ -128,15 +128,14 @@ let rec repr_value value verbose = match value with
 	| V_Unit		-> "()"
 
 	(* TODO: repr_value: Use a better  syntax for lists *)
-	| V_Ctor ("Cons", V_Tuple [a; b])
-					-> repr_value a false ^ " :: " ^ repr_value b false
-	| V_Ctor ("Empty", _)
-					-> "[]"
+	| V_Ctor ("Cons", V_Tuple [a; b]) ->
+		repr_value a false ^ " :: " ^ repr_value b false
+	| V_Ctor ("Empty", _) -> "[]"
 	| V_Ctor (c, e)	-> c ^ " " ^ repr_value e false
 
 	(* Recursive constructs *)
-	| V_Ref r		-> "ref " ^ repr_value (memory_get r) false
-	| V_Tuple l		->
+	| V_Ref r -> "ref " ^ repr_value (memory_get r) false
+	| V_Tuple l ->
 		let recurse v = repr_value v false in
 		"(" ^ String.concat ", " (List.map recurse l) ^ ")"
 
@@ -151,6 +150,10 @@ let rec repr_value value verbose = match value with
 		let make_one name value start =
 			sprintf "%s\n  %s = %s" start name (repr_value value false) in
 		StringMap.fold make_one closure head
+
+	(* Built-in functions, memory objects *)
+	| V_Builtin f -> "<builtin>"
+	| V_Memory (_, m) -> "<builtin memory>"
 
 
 

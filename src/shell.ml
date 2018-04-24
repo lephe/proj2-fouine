@@ -64,5 +64,5 @@ let shell_main conf =
 
 	print_string
 		"  This is an interactive Fouine shell. Type Ctrl-D to leave.\n\n";
-	let env = interpreter_start () in
+	let env = interpreter_start [] in
 	let _ = shell_repl conf env in ()

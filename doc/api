@@ -83,6 +83,10 @@ Source # Re-interpretable representations of objects
 	source_statement()	# Interpreter
 	source_program()	# Interpreter
 
+Transform # Program transformations that eliminate traits
+
+	transform_rename()	# Rename all variables to avoid conflicts
+
 Types # Type definitions and functor-generated modules
 
 	module IntSet
