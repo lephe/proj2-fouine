@@ -10,6 +10,11 @@ open Exceptions
    assign. I will use this one instead *)
 let r = range_empty
 
+(* list_init - Just List.init without requiring Ocaml 4.06 *)
+let rec list_init n f =
+	let rec do_one m = if m = n then [] else f m :: do_one (m + 1)
+	in do_one 0
+
 (*
 **	Variable renaming
 *)
@@ -225,7 +230,7 @@ and imperative_expr tree =
 	| E_Tuple el ->
 		(* Give names to the values of the tuple *)
 		let n = List.length el in
-		let names = List.init n (fun i -> "v" ^ (string_of_int i)) in
+		let names = list_init n (fun i -> "v" ^ (string_of_int i)) in
 		(* Add numbers to elements of the list *)
 		let el' = List.combine names el in
 		qret (List.fold_right (fun (n, e) r -> qlet n e r) el'
@@ -382,7 +387,7 @@ and continuation_expr tree =
 		let rec do_list els acc = match els with
 		| [] -> acc
 		| (e, n) :: tl -> do_list tl (qfwd e n acc) in
-		let names = List.init (List.length l) (fun i -> "x"^string_of_int i) in
+		let names = list_init (List.length l) (fun i -> "x"^string_of_int i) in
 		do_list (List.rev (List.combine l names))
 			(qret (tuple (List.map name names)))
 
