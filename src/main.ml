@@ -4,6 +4,7 @@
 
 open Types
 open Errors
+open Lexing
 
 open Transform
 open Interpreter

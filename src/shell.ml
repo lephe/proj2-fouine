@@ -7,6 +7,7 @@ open Interpreter
 open Repr
 open Printf
 open Errors
+open Lexing
 
 (* TODO: Remove this once typing is properly integrated *)
 open Typing
