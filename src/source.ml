@@ -111,3 +111,61 @@ let source_statement stmt = begin match stmt with
    Builds a program listing out of the parsed representation *)
 let source_program stmts =
 	String.concat "\n" (List.map source_statement stmts)
+
+
+
+(* source_machine [machine_program -> string]
+   Returns an assembler listing of a machine program *)
+let source_machine prog =
+	let instruction n inst =
+		let str = match inst with
+		(* Manipulation of values *)
+		| M_Push v		-> sprintf "push    %s" (repr_value v false)
+		| M_Tuple n		-> sprintf "tuple   %d" n
+		| M_Ctor c		-> sprintf "ctor    \"%s\"" c
+		| M_Ref			-> sprintf "ref"
+		(* Functional traits *)
+		| M_Let p		-> sprintf "let     \"%s\"" (repr_pattern p)
+		| M_Match p		-> sprintf "match   \"%s\"" (repr_pattern p)
+		| M_EndLet p	-> sprintf "endlet  \"%s\"" (repr_pattern p)
+		| M_Access n	-> sprintf "access  \"%s\"" n
+		| M_Apply		-> sprintf "apply"
+		(* Imperative traits *)
+		| M_Jump a		-> sprintf "jump    <%x>" (n + a + 1)
+		| M_JumpIf a	-> sprintf "jumpif  <%x>" (n + a + 1)
+		| M_Ret			-> sprintf "ret"
+		(* Long jumps *)
+		| M_Setjmp a	-> sprintf "setjmp  <%x>" (n + a + 1)
+		| M_Longjmp		-> sprintf "longjmp"
+		(* Operators *)
+		| M_Bang		-> sprintf "bang"
+		| M_Assign		-> sprintf "assign"
+		(* Standard arithmetic *)
+		| M_UPlus		-> "plus"
+		| M_UMinus		-> "minus"
+		| M_Add			-> "add"
+		| M_Sub			-> "sub"
+		| M_Mul			-> "mul"
+		| M_Div			-> "div"
+		(* Comparisons between integers *)
+		| M_Eq			-> "cmp.eq"
+		| M_Ne			-> "cmp.ne"
+		| M_Gt			-> "cmp.gt"
+		| M_Ge			-> "cmp.ge"
+		| M_Lt			-> "cmp.lt"
+		| M_Le			-> "cmp.le"
+		(* Functions and recursive functions *)
+		| M_Close (r, p, a) ->
+			begin match r with
+			| None		-> sprintf "close   \"%s\" <%x>" (repr_pattern p) a
+			| Some n	-> sprintf "close   (\"%s\") \"%s\" <%x>" n
+						   (repr_pattern p) a
+			end
+
+		in sprintf "%6x:  %s\n" n str in
+
+	let strs = Array.make (Array.length prog) "" in
+	for i = 0 to Array.length prog - 1 do
+		strs.(i) <- instruction i prog.(i)
+	done;
+	Array.fold_right (^) strs ""

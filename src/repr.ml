@@ -155,6 +155,17 @@ let rec repr_value value verbose = match value with
 	| V_Builtin f -> "<builtin>"
 	| V_Memory (_, m) -> "<builtin memory>"
 
+	(* Stack machine-related values *)
+	| V_MachineClosure (_, env, addr) ->
+		let head = sprintf "<closure %x>" addr in
+		if not verbose then head else
+
+		let make_one start (name, value) =
+			sprintf "%s\n  %s = %s" start name (repr_value value false) in
+		List.fold_left make_one head env
+	| V_MachineFrame (_, addr) -> sprintf "<frame %x>" addr
+	| V_MachineBuiltin f -> "<builtin>"
+
 
 
 (* repr_statement [statement -> string]

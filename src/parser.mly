@@ -144,9 +144,6 @@ let make_list_one r e : ast =
 %nonassoc below_COMMA
 %left COMMA
 
-/* ARROW has a low priority so that fun x -> x + 2 means fun x -> (x + 2) */
-%right ARROW
-
 /* OCaml says that EQ, GT and LT have the same priority, but I have found
    nothing in the parser about NE, GE and LE. A bit of experimentation
    suggested that they all have the same precedence level */
@@ -183,15 +180,19 @@ let make_list_one r e : ast =
 */
 
 toplevel:
-	| SEMISEMI EOF | EOF				{ [] }
+	| SEMISEMI EOF						{ [] }
+	| p = toplevel_body					{ p }
+
+toplevel_body:
+	| EOF								{ [] }
 	| e = seq_expr EOF					{ [S_Expr (POS, e)] }
 
 	/* Allow using ";;" and omitting the "in" at the toplevel (OCaml syntax) */
-	| seq = toplevel_seq SEMISEMI p = toplevel { seq @ p }
+	| seq = toplevel_seq SEMISEMI p = toplevel_body { seq @ p }
 	| seq = toplevel_seq EOF { seq }
 
 	/* Expressions before ";;" resolve to "let _ = expr;;" */
-	| e = seq_expr SEMISEMI p = toplevel
+	| e = seq_expr SEMISEMI p = toplevel_body
 		{ S_LetVal (e.range, P_Wildcard, e) :: p }
 
 toplevel_seq:
@@ -200,10 +201,14 @@ toplevel_seq:
 /* Toplevel statements include let bindings and type definitions */
 toplevel_statement:
 	/* Two flavours of let; see "expr" for more detail */
-	| LET recursive = boption(REC) pat = pattern EQ e = expr
-		{ S_LetVal (POS, pat, e) }
+	| LET recursive = boption(REC) pat = pattern EQ e = seq_expr {
+		match recursive, pat with
+		| true, P_Name n -> S_LetRec (POS, n, e)
+		| true, _ -> raise (Error (POS, "Not allowed as lhs of let rec"))
+		| _ -> S_LetVal (POS, pat, e)
+	  }
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
-	  e = expr {
+	  e = seq_expr {
 		if not recursive
 		then S_LetVal (POS, P_Name n, make_fun POS args e)
 		else S_LetRec (POS, n, make_fun POS args e)
@@ -246,10 +251,14 @@ expr:
 	   Note that LetVal handles non-recursive function definitions as values;
 	   semantic differences only arise when using let rec */
 
-	| LET boption(REC) pat = pattern EQ e = seq_expr IN f = seq_expr
-										{ POS% E_LetVal (pat, e, f) }
+	| LET recurs = boption(REC) pat = pattern EQ e = seq_expr IN f = seq_expr {
+		match recurs, pat with
+		| true, P_Name n -> POS% E_LetRec (n, e, f)
+		| true, _ -> raise (Error (POS,"Not allowed as lhs of let rec"))
+		| _ -> POS% E_LetVal (pat, e, f)
+	  }
 
-	/* In function bindings, the we can only bind one name at a time */
+	/* In function bindings, we can only bind one name at a time */
 	| LET recursive = boption(REC) n = NAME args = nonempty_list(pattern) EQ
 	  e = seq_expr IN f = seq_expr {
 		if not recursive
@@ -325,8 +334,8 @@ atomic_expr:
 	| LPAR RPAR 						{ POS% E_Unit }
 
 	/* Expressions enclosed within parentheses or begin..end */
-	| LPAR e = expr RPAR				{ e }
-	| BEGIN e = expr END				{ e }
+	| LPAR e = seq_expr RPAR			{ e }
+	| BEGIN e = seq_expr END			{ e }
 
 	/* Dereferencing */
 	| BANG ae = atomic_expr				{ make_unary POS "!" ae }
@@ -352,7 +361,7 @@ match_cases:
 										{ c :: mc }
 
 match_case:
-	| p = pattern ARROW e = expr		{ (p, e) }
+	| p = pattern ARROW e = seq_expr	{ (p, e) }
 
 /*
 **	Binding patterns for use by let expressions and function definitions

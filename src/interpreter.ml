@@ -18,47 +18,56 @@ open Range
 **	exceptions.
 *)
 
-(* builtin_prInt [range -> value -> env -> value] [private] *)
-let builtin_prInt r value env = match value with
-	| V_Int i -> Printf.printf "%d\n" i; V_Int i
+open Repr
+open Source
+
+(* builtin_prInt [private]
+   [range -> value -> env -> (value -> value) -> value] *)
+let builtin_prInt r value env k = match value with
+	| V_Int i -> Printf.printf "%d\n" i; k (V_Int i)
 	| v -> raise (TypeError (r, "int", value_type v env))
 
-(* builtin_raise [range -> value -> env -> value] [private] *)
-let builtin_raise r value env =
+(* builtin_raise [private]
+   [range -> value -> env -> (value -> value) -> value] *)
+let builtin_raise r value env k =
 	(* Unfold all patterns until a suitable exception handler is found. We have
 	   a list (nested try stack) of lists (patterns of a single try) *)
 	let rec try_handlers handlers v = match handlers with
 		(* If all the handlers have been unwound, call the toplevel *)
 		| [] -> raise (UncaughtException (r, v))
 		(* Unwind the try stack further *)
-		| (env, []) :: other_trys -> try_handlers other_trys v
+		| (env, recs, k, []) :: trys -> try_handlers trys v
 		(* Try to match the given pattern against the thrown value *)
-		| (local_env, (p, f) :: tl) :: other_trys ->
+		| (local_env, local_recs, local_k, (p, f) :: tl) :: trys ->
 			(* Use the environment where try is being run - this is crucial! *)
 			try let newenv = pattern_bind p v local_env in
-			(* There! We completely drop the continuation and use expr_eval *)
-			expr_eval f newenv with
+			(* There! We completely drop the continuation and use local_k *)
+			expr_eval_k f newenv local_recs local_k with
 			| MultiBind (b, _, set) -> raise (MultiBind (b, r, set))
-			| MatchError _ -> try_handlers ((local_env, tl) :: other_trys) v
+			| MatchError _ ->
+				try_handlers ((local_env, local_recs, local_k, tl) :: trys) v
 
 	in try_handlers env.exchs value
 
-(* builtin_alloc [range -> value -> env -> value] [private] *)
-let builtin_alloc r value env = match value with
+(* builtin_alloc [private]
+   [range -> value -> env -> (value -> value) -> value] *)
+let builtin_alloc r value env k = match value with
 	| V_Tuple [V_Memory (addr, m); v] ->
 		Hashtbl.add m addr v;
-		V_Tuple [V_Ref addr; V_Memory (addr + 1, m)]
+		k (V_Tuple [V_Ref addr; V_Memory (addr + 1, m)])
 	| v -> raise (TypeError (r, "<builtin memory> * 'a", value_type v env))
 
-(* builtin_read [range -> value -> env -> value] [private] *)
-let builtin_read r value env = match value with
-	| V_Tuple [V_Memory (_, m); V_Ref addr] -> Hashtbl.find m addr
+(* builtin_read [private]
+   [range -> value -> env -> (value -> value) -> value] *)
+let builtin_read r value env k = match value with
+	| V_Tuple [V_Memory (_, m); V_Ref addr] -> k (Hashtbl.find m addr)
 	| v -> raise (TypeError (r, "<builtin memory> * ref", value_type v env))
 
-(* builtin_write [range -> value -> env -> value] [private] *)
-let builtin_write r value env = match value with
+(* builtin_write [private]
+   [range -> value -> env -> (value -> value) -> value] *)
+let builtin_write r value env k = match value with
 	| V_Tuple [V_Memory (a, m); V_Ref addr; v] ->
-		Hashtbl.replace m addr v; V_Memory (a, m)
+		Hashtbl.replace m addr v; k (V_Memory (a, m))
 	| v -> raise (TypeError (r,"<builtin memory> * ref * 'a",value_type v env))
 
 (*

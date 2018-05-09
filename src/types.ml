@@ -23,6 +23,8 @@ module IntMap = Map.Make(struct
 	let compare = Pervasives.compare
 end)
 
+
+
 (*
 **	Command-line options
 *)
@@ -38,10 +40,14 @@ type config = {
 
 	transf:		char list;	(* Transformations to apply (ordered) *)
 	outcode:	bool;		(* Print transformed code *)
+	machine:	bool;		(* Use the stack machine to execute the program *)
+	stackcode:	bool;		(* Print the compiled code *)
 
 	help:		bool;		(* Show help message and return *)
 	_ok:		bool;		(* Says whether the configuration is valid *)
 }
+
+
 
 (*
 **	Typing-related definitions
@@ -119,7 +125,7 @@ type expr_tree =
 	| E_Name			of string
 	(* Type constructors *)
 	| E_Ctor			of string * expr
-	(* Pattern matching and try .. match statements *)
+	(* Pattern matching and try .. with statements *)
 	| E_Match			of expr * (pattern * expr) list
 	| E_Try				of expr * (pattern * expr) list
 	(* Let bindings. The semantics of let-value and let-rec are so different
@@ -171,7 +177,7 @@ type statement =
 	| S_Type	of range * string * string list
 
 (* program
-   Just put up statements together and you get a full progam *)
+   Just put up statements together and you get a full program *)
 type program = statement list
 
 (* value
@@ -194,15 +200,23 @@ type value =
 	   their body. See "eval.ml" for recursion details *)
 	| V_Closure of value StringMap.t * string option * pattern * expr
 	(* Built-in functions that rely on an OCaml implementation *)
-	| V_Builtin of (range -> value -> env -> value)
+	| V_Builtin of (range -> value -> env -> (value -> value) -> value)
 	(* A memory - used only by programs that went under -R, -RE or -ER *)
 	| V_Memory of int * memory
+	(* Machine closures used by the stack machine *)
+	| V_MachineClosure of pattern * machine_env * int
+	(* Machine stack frame *)
+	| V_MachineFrame of machine_env * int
+	(* Machine builtings *)
+	| V_MachineBuiltin of (machine_program -> int -> machine_stack ->
+		machine_env -> machine_state list -> value -> unit)
 
 (* exch
    Exception handler for try statements. An single expression for each handled
    exception type, but we also need to capture the environment in which the try
-   statement is executed, otherwise we won't unwind the stack at all! *)
-and exch = env * (pattern * expr) list
+   statement is executed, otherwise we won't unwind the stack at all! We also
+   save the continuation to be able to resume execution *)
+and exch = env * StringSet.t * (value -> value) * (pattern * expr) list
 
 (* env
    A set of name -> value mappings, as well as a set of name -> type mappings
@@ -227,11 +241,62 @@ and memory = (memory_addr, value) Hashtbl.t
    The type of memory addresses. I wanted to keep it opaque *)
 and memory_addr = int
 
+
+
+(*
+**	Shell-specific types
+*)
+
 (* event
    Noticeable events that happen during program execution. These are emitted by
    the Interpreter module and typically reported by the interactive shell *)
 (* TODO: Add type definitions events! *)
 (* TODO: Add "exit function was called" event *)
-type event =
+and event =
 	| Ev_Result of value
 	| Ev_Binding of string * value
+
+
+
+(*
+**	Compilation-related types
+*)
+
+and machine_stack =
+	value list
+
+and machine_instr =
+	(* Manipulation of values *)
+	| M_Push		of value			(* Push constant to stack *)
+	| M_Tuple		of int				(* Make a tuple *)
+	| M_Ctor		of string			(* Instantiate an ADT *)
+	| M_Ref								(* Create a reference *)
+	(* Functional traits *)
+	| M_Let			of pattern			(* Move a value to the environment *)
+	| M_Match		of pattern			(* Try to bind, return match status *)
+	| M_EndLet		of pattern			(* Pop values from the environment *)
+	| M_Access		of string			(* Access variable *)
+	| M_Close		of string option * pattern * int
+	| M_Apply							(* Apply function *)
+	(* Imperative traits *)
+	| M_Jump		of int				(* Jump to offset *)
+	| M_JumpIf		of int				(* Jump to offset if condition holds *)
+	| M_Ret								(* Return from function *)
+	(* Long jumps for try .. with statements *)
+	| M_Setjmp		of int				(* Save machine state *)
+	| M_Longjmp							(* Restore machine state *)
+	(* Operators *)
+	| M_Bang | M_Assign
+	(* Standard arithmetic *)
+	| M_UPlus | M_UMinus | M_Add | M_Sub | M_Mul | M_Div
+	(* Comparisons between integers *)
+	| M_Eq | M_Ne | M_Gt | M_Ge | M_Lt | M_Le
+
+and machine_program =
+	machine_instr array
+
+and machine_env =
+	(string * value) list
+
+and machine_state =
+	int * machine_stack * machine_env

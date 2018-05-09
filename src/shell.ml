@@ -57,11 +57,21 @@ let rec shell_repl conf env =
 	let newenv = List.fold_left execute_stmt env stmts in
 	if stmts = [] then env else shell_repl conf newenv
 
+open Machine
+open Source
+
 (* shell_main [config -> unit]
    Starts an interactive REPL session. Returns when the user leaves the
    interpreter *)
 let shell_main conf =
 	(* typing_tests (); *)
+	let prg = [|
+		M_Push (V_Int 4);
+		M_Push (V_Int 8);
+		M_Add;
+	|] in
+	print_string (source_machine prg);
+	machine_exec prg;
 
 	print_string
 		"  This is an interactive Fouine shell. Type Ctrl-D to leave.\n\n";

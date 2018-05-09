@@ -1,28 +1,8 @@
 # Projet 2 : Fouine (Sébastien Michelland)
 
-Originellement en binôme avec Sébastien Baumert, et puis finalement non.
-
-Pour le rendu 3, je propose les exceptions et les deux transformations
-demandées. Je n'ai pas implémenté le call/cc (qui nécessaite d'utiliser -E) et
-les tableaux au profit d'un shell et un poil de typage.
-
-Les exceptions sont implémentées en style par continuations, qui est donc aussi
-celui de eval(). On peut jeter n'importe quel objet fouine, et "E" n'est qu'un
-constructeur d'ADT utilisé pour ce cas spécifique.
-
-Les transformations sont implémentées dans un module Transform. Malgré toutes
-les tentatives pour alléger, ça reste dense. La gestion des builtins a été un
-peu difficile, mais c'est plus un "détail d'implémentation". J'ai triché pour
-le let-rec en continuations, j'en parle plus bas.
-
-On peut lancer un shell interactif en invoquant `./fouine` sans argument, et il
-est tout aussi bien avec `ledit`. Le module Typing contient une implémentation
-d'Algorithme W sur le lambda-calcul et n'est pas encore intégré au le reste du
-programme.
-
-On peut trouver, dans le fichier `notes/todo`, une description d'un algorithme
-pour tester l'exhaustivité des match et les cas inutiles. Je doute d'avoir le
-temps de l'implémenter...
+Je n'ai pas implémenté d'option de l'exécutable pour comparer le résultat
+renvoyé par la machine à pile au résultat interprété ; le script de test le
+fait déjà de façon automatique.
 
 ## Organisation des fichiers
 
@@ -57,7 +37,7 @@ produit pas chez moi.
 
 ## Tests automatisés
 
-Pour lancer tous les tests, utilisez `make test-all`. Il y en a 6 types :
+Pour lancer tous les tests, utilisez `make test-all`. Il y en a 7 types :
 
 - Parsing
 - Comparaison avec OCaml
@@ -65,44 +45,151 @@ Pour lancer tous les tests, utilisez `make test-all`. Il y en a 6 types :
 - Vérification de quelques exceptions
 - Fidélité de -debug
 - Comparaison des transformations avec le programme original
+- Comparaison de la machine à pile avec le programme original
 
-J'ai environ soixante-dix fichiers de tests, voulus unitaires, répartis par
+J'ai soixante-quinze fichiers de tests, voulus unitaires, répartis par
 thématique dans les sous-dossiers de `tests/`. Le fichier `tests/prelude.ml`
 sert pour tester avec OCaml.
 
-Ça fait quasiment 300 tests avec toutes les réplications, mais y'a beaucoup de
-redondance...
+## Corrections depuis le rendu 3
 
-## Point critique : le let-rec par continuations
 
-Mon implémentation du let-rec rend la conception d'une transformation terminale
-assez impossible. Pour créer une clôture récursive, on est obligés d'écrire :
 
-	[| let rec f = e in g |] = fun k kE ->
-		... let rec f = ... [| e |] ... in ...
+* `let rec f = fun x -> if x=0 then 1 else f 0 in prInt (f 5)` refusé
+   Mon parser prenait ça pour un let-valeur et le classifiait abusivement en
+   non-récursif. J'ai relégué le refus du let-valeur récursif à l'évaluateur
+   pour autoriser cette construction.
 
-Et comme il y a un `in`, ce n'est par nature pas terminal. La transformation
-que je rends est comme ça et peut faire exploser la pile sur les récursions
-dès 10 niveaux de profondeur quand on utilise -RE et -ER.
+* `let a = 3; () let b = 5;; prInt b` refusé
+  La règle du let est [let pattern = seq_expr in seq_expr], mais j'avais oublié
+  de changer le [= expr] en [= seq_expr] quand j'ai introduit seq_expr.
 
-En pratique je pense que c'est un problème de langage et d'interprétation
-plutôt qu'un problème de fond. On pourrait introduire une sorte de combinateur
-de point fixe pour se substituer à let rec, qui rende les clôtures récursives :
+* L’interprète ne renvoie pas le bon résultat lorsque l’on lève une exception
+  “à l’intérieur d’une exception”.
+  L'erreur était significative. Mon implémentation originale des built-ins
+  était naïve (value -> value) et je passais le résultat à la continuation
+  courante sans la leur montrer. Évidemment, pour `raise` ce n'est pas
+  acceptable, mais mes tests avaient le mauvais goût de "marcher" quand même.
+  La résolution du bug a aussi expliqué pourquoi l'un des tests (try/nested.ml)
+  était lent sous -ER et -RE.
 
-	Φ : string -> closure -> closure
+* `try (r := !r+1; raise (E 0)) with | E y -> 12` refusé
+  Un autre oubli: j'avais laissé [(expr)] dans le parser au lieu d'autoriser
+  [(seq_expr)], donc il rejetait (r := r + 1; raise (E 0)).
 
-(il faut indiquer le nom sous lequel la récursion se produit). On aurait alors
-l'implémentation suivante :
+## Langage adopté pour la machine SECD
 
-	[| let rec f = e in g |] = fun k kE ->
-		[| e |] (fun f0 -> let f = Φ f0 in [| g |] k kE) kE
+J'ai adopté un langage type assembleur, par envie de faire de l'impératif je
+crois. Pour se rapprocher du réalisme, j'ai évité de placer du code dans les
+instructions de clôture et je l'ai mis dans le listing à la place. Il a donc
+fallu agencer le code de façon à ce que la cohabitation des fonctions et de
+leurs sous-fonctions au même niveau se passe bien.
 
-Il faudrait aussi que l'interpréteur ne gueule pas (trop) en voyant que `f` est
-manquante dans l'environnement au moment de créer la clôture durant
-l'évaluation de `[| e |]`. Pour en avoir brièvement parlé avec Victor Bonne, je
-crois qu'il a cette "liberté", et ça lui permet de faire une implémentation
-plus standard.
+Je n'ai pas implémenté de parser pour le langage SECD ; ce qui suit est les
+conventions utilisées par -stackcode. Chaque instruction est accompagnée d'une
+description (rapide) de son effet.
 
-J'ai dû chercher un bon moment et je n'ai pas eu le temps de l'implémenter (ni
-de me résoudre à rendre laxiste la partie de l'interpréteur qui crée les
-clôtures).
+  push <value>
+    Empile une donnée sur la pile. La valeur peut être arbitrairement
+    compliquée, y compris être une liste de 1000 éléments.
+  tuple n
+    Dépile les n derniers éléments de la pile et forme un tuple en inversant
+    l'ordre des valeurs. Empile le résultat.
+  ctor "Name"
+    Dépile une valeur v et empile Name v.
+  ref
+    Dépile une valeur v et empile une nouvelle référence initialisée à v.
+
+  let "pattern"
+    Dépile une valeur et filtre par le pattern. En cas d'échec, une exception
+    est levée. Sinon, empile sur l'environnement autant de bindings qu'il y a
+    de variables libres dans le pattern.
+  match "pattern"
+    En cas de succès, se comporte comme "let" et empile false sur la pile. En
+    cas d'échec, aucun binding n'est fait, la valeur filtrée est renvoyée sur
+    la pile, et true est empilé.
+  endlet "pattern"
+    Dépile autant d'éléments de l'environnement qu'il y a de variables libres
+    dans le pattern.
+  access "name"
+    Empile la valeur associée à "name" dans l'environnement.
+
+  close "pattern" <addr>
+    Empile une clôture dont l'argument est "pattern" et l'adresse du code
+    <addr> sur la pile.
+    NB. En pratique <addr> est stocké relativement à la valeur de PC.
+  close ("name") "pattern" <addr>
+    Comme close, mais la clôture est rendue récursive sous le nom "name".
+    NB. En pratique <addr> est stocké relativement à la valeur de PC.
+  apply
+    Dépile une fonction et un argument, binde l'argument et appelle la
+    fonction. Il peut s'agir d'un built-in.
+
+  jump <addr>
+    Saute à l'adresse <addr>.
+    NB. En pratique <addr> est stocké relativement à la valeur de PC.
+  jumpif <addr>
+    Dépile un booléen, et saute à l'adresse <addr> si le booléen est "true".
+    C'est pour utiliser cette instruction (comme je n'ai pas implémenté les
+    opérations logiques) que "match" a cette convention bizarre.
+    NB. En pratique <addr> est stocké relativement à la valeur de PC.
+  ret
+    Quitte la fonction et remonte au stack frame précédent.
+
+  setjmp <addr>
+    Sauvegarde l'état de la machine en indiquant que le code à exécuter en cas
+    de "longjmp" est à l'addresse <addr>. L'état sauevgardé est empilé sur une
+    pile à part.
+    NB. En pratique <addr> est stocké relativement à la valeur de PC.
+  longjmp
+    Dépile le dernier état sauvegardé et saute à l'endroit indiqué en
+    restaurant l'état de la machine. La dernière valeur de la pile est
+    préservée au titre d'argument du saut.
+
+  bang
+    Dépile une référence, la déréférence, et empile le résultat.
+  assign
+    Dépile une référence, une valeur, et met à jour la référence.
+
+  plus, minus, add, sub, mul, div
+    Arithmétique.
+  cmp.eq, cmp.ne, cmp.gt, cmp.ge, cmp.lt, cmp.le
+    Comparaisons.
+
+## Points intéressants du langage SECD
+
+J'autorise la machine à se casser la figure si le programme d'entrée ne se
+termine pas sans exception, notamment si :
+- Une valeur passe à travers tous les cas d'un match
+- Une exception n'est pas rattrapée
+
+J'ai implémenté les if/else avec des sauts au lieu de procéder comme le
+λ-calcul (apparemment la raison historique de la machine SECD), qui m'aurait
+obligé à calculer les deux branches avant de choisir. Cela aurait posé des
+problèmes de terminaison pour les fonctions récursives.
+
+J'ai implémenté les exceptions à la sauce impérative avec du setjmp et du
+longjmp. J'ai sauvegardé les états sur une pile indépendante mais si j'avais
+disposé d'un nom réservé (genre "JMPBUF") j'aurais également pu les mettre sur
+l'environnement.
+
+Les long jumps étant déjà très puissants, je n'ai plus eu besoin d'utiliser un
+built-in pour raise. J'ai donc pris le parti de définir la fonction raise
+en assembleur/SECD au début de chaque programme. Le seul built-in restant est
+du coup prInt (entrées/sorties tout ça tout ça).
+
+Le plus intéressant reste ce que j'appelle le "linker" dans le code mais qui
+consiste juste à attribuer des adresses aux fonctions et à gérer les clôtures.
+Je voulais que le code soit "plat" donc éviter de mettre du code dans les
+instructions de clôture.
+
+Le "linker" sert à agencer tout cela en mémoire en s'assurant que les
+sous-fonctions soient compilées avant d'être référencées et à leur attribuer
+des adresses (temporaires dans un premier temps) quitte à éditer les
+instructions de clôture après coup.
+
+Le seul résultat vraiment "utile" est que le code généré est position-
+independent. L'affichage de -stackcode affiche les adresses absolutes pour la
+lisibilité, mais tout est en relatif.
+
+Le fichier `src/machine.ml` contient une description complète du système.

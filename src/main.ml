@@ -9,6 +9,7 @@ open Lexing
 open Transform
 open Interpreter
 open Shell
+open Machine
 
 open Repr
 open Source
@@ -20,36 +21,42 @@ let help_message =
 "       fouine [-stdin] [options...]\n" ^
 "\n" ^
 "Input options:\n" ^
-"  <file>    Execute <file>, then leave\n" ^
-"  -stdin    Read from stdin (expect shorter error diagnoses)\n" ^
-"  (none)    Start the Read-Eval-Print Loop shell\n" ^
+"  <file>      Execute <file>, then leave\n" ^
+"  -stdin      Read from stdin (expect shorter error diagnoses)\n" ^
+"  (none)      Start the Read-Eval-Print Loop shell\n" ^
 "\n" ^
 "Debugging options:\n" ^
-"  -ast      After parsing, show an AST\n" ^
-"  -debug    After parsing, show regenerated sources (overrides -ast)\n" ^
-"  -parse    Stop after parsing; do not evaluate\n" ^
+"  -ast        After parsing, show an AST\n" ^
+"  -debug      After parsing, show regenerated sources (overrides -ast)\n" ^
+"  -parse      Stop after parsing; do not evaluate\n" ^
 "\n" ^
 "Transformation options:\n" ^
-"  -E        Eliminate exceptions using continuations\n" ^
-"  -R        Eliminate imperative traits using memory-passing\n" ^
-"  -ER, -RE  Eliminate both (last first, first last)\n" ^
-"  -outcode  Print resulting code after transformation\n"
+"  -E          Eliminate exceptions using continuations\n" ^
+"  -R          Eliminate imperative traits using memory-passing\n" ^
+"  -ER, -RE    Eliminate both (last first, first last)\n" ^
+"  -outcode    Print resulting code after transformation\n" ^
+"\n" ^
+"Stack machine options:\n" ^
+"  -machine    Compile to a stack machine before executing\n" ^
+"  -stackcode  Print the machine code (only execute is -machine is on)\n"
 
 (* Default configuration mode - run silently *)
 let default_conf = {
-	file 	= "";
-	stdin	= false;
-	shell	= false;
+	file 		= "";
+	stdin		= false;
+	shell		= false;
 
-	ast		= false;
-	debug	= false;
-	parse	= false;
+	ast			= false;
+	debug		= false;
+	parse		= false;
 
-	transf	= [];
-	outcode	= false;
+	transf		= [];
+	outcode		= false;
+	machine		= false;
+	stackcode	= false;
 
-	help	= false;
-	_ok		= true;
+	help		= false;
+	_ok			= true;
 }
 
 (* config_parse [string array -> config]
@@ -69,6 +76,9 @@ let config_parse argv =
 		| "-ER"			-> { conf with transf = [ 'R'; 'E' ] }
 		| "-RE"			-> { conf with transf = [ 'E'; 'R' ] }
 		| "-outcode"	-> { conf with outcode = true }
+
+		| "-machine"	-> { conf with machine = true }
+		| "-stackcode"	-> { conf with stackcode = true }
 
 		| "-ast"		-> { conf with ast = true }
 		| "-debug"		-> { conf with debug = true }
@@ -113,10 +123,9 @@ let s_get_this_show_on_the_road =
 	if conf.shell then (shell_main conf; exit 0);
 
 	(* Open the source script *)
-	let (channel, name) =
-			if conf.stdin then (stdin, "")
-			else (open_in conf.file, conf.file)
-	in
+	let (channel, name) = if conf.stdin
+	then (stdin, "")
+	else (open_in conf.file, conf.file) in
 
 	(* Prepare the lexer and record the file name *)
 	let lexbuf = Lexing.from_channel channel in
@@ -134,6 +143,20 @@ let s_get_this_show_on_the_road =
 
 	(* Transform the program if any of -E, -R, -ER or -RE is specified *)
 	let program = transform program conf.transf in
+
+	(* If -machine or -stackcode is specified, enter the stack machine mode *)
+	if conf.machine || conf.stackcode then begin
+		let code = machine_compile program in
+		(* Print the source if -stackcode is specified *)
+		if conf.stackcode then print_string (source_machine code);
+		if conf.stackcode && conf.machine then print_newline ();
+		(* Execute the program if -machine is specified *)
+		let result = if conf.machine
+		then errors_try (fun () -> machine_exec code)
+		else Some () in
+		(* Leave now since we don't interpret the Fouine program as is *)
+		exit (if result = None then 1 else 0)
+	end;
 
 	(* Print the resulting source if -outcode is on *)
 	if conf.transf <> [] && conf.outcode

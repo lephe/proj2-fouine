@@ -20,3 +20,7 @@ let rec value_type v env = match v with
 	(* TODO: value_type: Manually specify the type of built-in functions *)
 	| V_Builtin f	-> "<builtin>"
 	| V_Memory (_,m)-> "<builtin memory>"
+	(* Machine-related types *)
+	| V_MachineClosure	(_, _, _)	-> "<machine closure>"
+	| V_MachineFrame	(_, _)		-> "<machine frame>"
+	| V_MachineBuiltin	(_)			-> "<machine builtin>"

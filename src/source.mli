@@ -15,3 +15,7 @@ val source_statement : statement -> string
 (* source_program
    Builds a program listing out of the parsed representation *)
 val source_program : program -> string
+
+(* source_machine
+   Returns an assembler listing of a machine program *)
+val source_machine : machine_program -> string

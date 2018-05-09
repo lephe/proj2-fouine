@@ -231,3 +231,22 @@ envoyé).
   builtins spécifiques qui s'activent sur -R : "read", "write" et "alloc". Tout
   cela se passe dans le module *Transform*; les builtins sont dans
   *Interpreter*.
+
+*[master 450dbb9]*
+	Rendu 3: Mainly transformations
+
+*[master 80233f2]*
+	Stop using List.init for compatibility with OCaml 2.03
+
+*[master 50c6c68]*
+	Open Lexing to carefully specify record fields
+
+---
+
+* Défini la machine à pile dans un style assembleur (c'est plus fun). Sauts et
+  addresses mémoire au rendez-vous. Tout cela est dans le module *Machine*.
+
+* Implémenté une sorte de linker pour pouvoir placer le code des sous-fonctions
+  au milieu du reste, sans avoir à le contenir dans une instruction.
+
+* Implémenté le compilateur de Fouine vers le langage à pile.

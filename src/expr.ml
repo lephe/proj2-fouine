@@ -75,17 +75,20 @@ let rec expr_free exp =
 (* TODO: Do something about the expect_* functions. Typing will make sure that
    TODO: the type is correct, but OCaml will not know... *)
 
+open Repr
+open Source
+
 (* expect_int [private]
    [expr -> env -> StringSet.t -> (int -> value) -> value] *)
 let rec expect_int exp env recs k =
-	eval exp env recs (function
+	expr_eval_k exp env recs (function
 	| V_Int i -> k i
 	| v -> raise (TypeError (exp.range, "int", value_type v env)))
 
 (* expect_closure [expr -> env -> StringSet.t -> (value StringMap.t ->
    string option -> pattern -> expr -> value) -> value] [private] *)
 and expect_closure exp env recs k =
-	eval exp env recs (function
+	expr_eval_k exp env recs (function
 	| V_Closure (closure, recursive, pat, exp) -> k closure recursive pat exp
 	| v -> raise (TypeError (exp.range, "function", value_type v env)))
 
@@ -94,20 +97,21 @@ and expect_closure exp env recs k =
    value (or throwing an exception). The environment argument contains both
    values and types, which makes this function pure. *)
 and expr_eval exp env =
-	eval exp env StringSet.empty (fun v -> v)
+	expr_eval_k exp env StringSet.empty (fun v -> v)
 
-(* eval [expr -> env -> StringSet.t (value -> value) -> value]
-   Pretty much the same as expr_eval, but in continuation-style!
-   The set of strings consists in names that are begin recursively defined, so
-   it's not a problem if they can't be captured by closures *)
-and eval exp env recs k : value =
+(* eval_eval_k [expr -> env -> StringSet.t -> (value -> value) -> value]
+   A continuation-style version of expr_eval with an additional set of strings
+   indicating which names are begin recursively defined *)
+and expr_eval_k exp env recs k : value =
 
 	(* This piece of code would automatically show the evaluated expression and
 	   a dump of the environment in the terminal. This is very verbose!
 	print_string "<<< Evaluating\n";
 	range_highlight exp.range stdout;
-	EnvMap.iter (fun n v -> Printf.printf "%s: %s\n" n (repr_value v) env.vars;
+	EnvMap.iter (fun n v -> Printf.printf "%s: %s\n" n (repr_value v) env.vars);
 	print_newline (); *)
+
+	let rec eval = expr_eval_k in
 
 	(* A helper for arithmetic operators *)
 	let arith op e f k =
@@ -131,9 +135,9 @@ and eval exp env recs k : value =
 	| E_Unit		-> k (V_Unit)
 	(* Lookup names in the environment *)
 	| E_Name n ->
-		begin try k (StringMap.find n env.vars) with
+		let value = try StringMap.find n env.vars with
 		| Not_found -> raise (NameError (exp.range, n))
-		end
+		in k value
 
 	(* Type constructors : first check that the constructor exists *)
 	| E_Ctor (ctor, e) ->
@@ -158,8 +162,9 @@ and eval exp env recs k : value =
 	(* Try .. match statements - note that env.exchs contains continuations! *)
 	| E_Try (e, cl) ->
 		(* Turn the cases into exception handlers. Pretty immediate! Also save
-		   the current environment for when an exception is raised *)
-		eval e { env with exchs = (env, cl) :: env.exchs } recs k
+		   the current environment for when an exception is raised, along with
+		   the continuation, that will be resumed if an exception is caught *)
+		eval e { env with exchs = (env, recs, k, cl) :: env.exchs } recs k
 
 	(* Let-value: use term unification (rather, filtering) to get the list of
 	   all bindings, then extend the environment *)
@@ -203,7 +208,7 @@ and eval exp env recs k : value =
 
 	(* Evaluate and bind the argument, *then* evaluate the function *)
 	| E_Call (func, arg) ->
-		eval arg  env recs (fun varg ->
+		eval arg env recs (fun varg ->
 		eval func env recs (fun vfun ->
 
 		begin try match vfun with
@@ -217,7 +222,7 @@ and eval exp env recs k : value =
 			let env = { env with vars = closure } in
 			eval exp (pattern_bind pat varg env) recs k
 		(* Keep built-ins simple, stupid *)
-		| V_Builtin f -> k (f exp.range varg env)
+		| V_Builtin f -> f exp.range varg env k
 
 		(* Reject values... *)
 		| _ -> raise (TypeError (func.range, "function", value_type vfun env))

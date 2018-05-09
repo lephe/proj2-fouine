@@ -32,6 +32,8 @@ highlight=$(which highlight 2> /dev/null)
 replicate=
 # Transformations to test
 transf=
+# Whether to test the stack machine
+machine=
 
 function show_output()
 {
@@ -197,18 +199,18 @@ function transform()
 	return 1
 }
 
-
 # Parse command-line options
 #   -replicate triggers testing fouine's -debug output through ocaml
 #   -R, -E, -ER and -RE trigger testing the transformations
 #   Other options go directly to fouine for debug
 for arg; do case "$arg" in
-	"-replicate") replicate=true;;
-	"-R") transf="$transf -R";;
-	"-E") transf="$transf -E";;
-	"-ER") transf="$transf -ER";;
-	"-RE") transf="$transf -RE";;
-	*) fopt="$fopt $arg";;
+	"-replicate")	replicate=true;;
+	"-R")		transf="$transf -R";;
+	"-E")		transf="$transf -E";;
+	"-ER")		transf="$transf -ER";;
+	"-RE")		transf="$transf -RE";;
+	"-machine")	machine=true;;
+	*)		fopt="$fopt $arg";;
 esac; done
 
 echo -e "${W}"
@@ -282,8 +284,8 @@ if [[ $replicate ]]; then
 fi
 
 # Transformation tests
-for tr in $transf; do
-	for folder in $tests_output $tests_zero; do
+for folder in $tests_output $tests_zero; do
+	for tr in $transf; do
 		echo -e "${W}TRANSFORM $tr: $folder${w}"
 		for file in tests/$folder/*; do
 			transform "$tr" "$file"
@@ -292,6 +294,16 @@ for tr in $transf; do
 		done
 		echo ""
 	done
+
+	if [[ $machine ]]; then
+		echo -e "${W}MACHINE: $folder${w}"
+		for file in tests/$folder/*; do
+			transform "-machine" "$file"
+			passed=$(($passed + 1 - $?))
+			performed=$(($performed + 1))
+		done
+		echo ""
+	fi
 done
 
 # Okay!

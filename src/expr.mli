@@ -13,3 +13,8 @@ val expr_free : expr -> StringSet.t
    value (or throwing an exception). The environment argument contains both
    values and types, which makes this function pure *)
 val expr_eval : expr -> env -> value
+
+(* expr_eval_k
+   A continuation-style version of expr_eval with an additional set of strings
+   indicating which names are begin recursively defined *)
+val expr_eval_k : expr -> env -> StringSet.t -> (value -> value) -> value
