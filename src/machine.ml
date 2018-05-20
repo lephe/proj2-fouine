@@ -8,6 +8,23 @@ open Pattern
 open Memory
 
 open Repr
+open Source
+
+(* recursify [machine_instr list -> string -> char list -> machine_instr list]
+   Makes the code of a function recursive. The location of the suitable close
+   instruction depends on the type of transformation. *)
+let recursify code n transf =
+	let close instr = match instr with
+	| M_Close (None, p, addr) -> M_Close (Some n, p, addr)
+	| _ -> raise (InternalError "Trying to build a recursive value") in
+
+	match (transf, code) with
+	| ([],			[i])				-> [close i]
+	| (['R'],		i :: j :: k)		-> i :: close j :: k
+	| (['E'],		i :: j :: k)		-> i :: close j :: k
+	| (['R'; 'E'],	i :: j :: k :: l)	-> i :: j :: close k :: l
+	| (['E'; 'R'], _) -> raise (InternalError "Machine -RE: TODO x_x")
+	| _  -> raise (InternalError "Trying to build a recursive value")
 
 (* machine_eval [private]
    [machine_program -> int -> machine_stack -> machine_env
@@ -122,7 +139,7 @@ let rec machine_eval prog pc stack env states =
 			eval addr (frame :: stack) (bindings @ closure_env)
 		| V_MachineBuiltin f ->
 			f prog pc stack env states varg
-		| _ -> raise (InternalError "Cannot call non-function")
+		| _ -> print_string (repr_value vfun true); raise (InternalError "Cannot call non-function")
 		end
 
 	(* Imperative traits *)
@@ -192,22 +209,58 @@ let rec machine_eval prog pc stack env states =
 	| M_Lt	-> comp  ( < )
 	| M_Le	-> comp ( <= )
 
-(* builtin_prInt [private]
-   [machine_program -> int -> machine_stack -> machine_env
-    -> machine_state list -> value -> unit] *)
-and builtin_prInt prog pc stack env states value = match value with
+type builtin = machine_program -> int -> machine_stack -> machine_env
+			-> machine_state list -> value -> unit
+
+(* builtin_prInt [builtin] [private] *)
+let builtin_prInt prog pc stack env states value = match value with
 	| V_Int x ->
 		Printf.printf "%d\n" x;
 		machine_eval prog (pc + 1) (value :: stack) env states
 	| _ -> raise (InternalError "Machine prInt type error")
 
-(* machine_exec [machine_program -> value]
-   Runs a machine program in an fresh machine and returns the result *)
-let machine_exec prog =
-	let builtins = [
-		("prInt",	V_MachineBuiltin builtin_prInt);
-	] in
-	machine_eval prog 0 [] builtins []
+(* builtin_alloc [builtin] [private] *)
+let builtin_alloc prog pc stack env states value = match value with
+	| V_Tuple [V_Memory (addr, m); v] ->
+		Hashtbl.add m addr v;
+		let ret = V_Tuple [V_Ref addr; V_Memory (addr + 1, m)] in
+		machine_eval prog (pc + 1) (ret :: stack) env states
+	| _ -> raise (InternalError "Machine alloc type error")
+
+(* builtin_read [builtin] [private] *)
+let builtin_read prog pc stack env states value = match value with
+	| V_Tuple [V_Memory (_, m); V_Ref addr] ->
+		let ret = Hashtbl.find m addr in
+		machine_eval prog (pc + 1) (ret :: stack) env states
+	| _ -> raise (InternalError "Machine read type error")
+
+(* builtin_write [builtin] [private] *)
+let builtin_write prog pc stack env states value = match value with
+	| V_Tuple [V_Memory (a, m); V_Ref addr; v] ->
+		Hashtbl.replace m addr v;
+		let ret = V_Memory (a, m) in
+		machine_eval prog (pc + 1) (ret :: stack) env states
+	| _ -> raise (InternalError "Machine write type error")
+
+(* machine_exec [machine_program -> char list -> value]
+   Runs a machine program in an fresh machine. Applied transformations are
+   indicated to initialize the environment with appropriate values. *)
+let machine_exec prog transf =
+	let has_r = List.exists ((=) 'R') transf in
+	let builtins =
+		(* Under normal conditions: empty environment and only prInt *)
+		if not has_r then [
+			("prInt",	V_MachineBuiltin builtin_prInt);
+		]
+		(* When -R is on, provide "s", "alloc", "read" and "write" *)
+		else [
+			("prInt",	V_MachineBuiltin builtin_prInt);
+			("alloc",	V_MachineBuiltin builtin_alloc);
+			("read",	V_MachineBuiltin builtin_read);
+			("write",	V_MachineBuiltin builtin_write);
+			("s",		V_Memory (0, Hashtbl.create 100));
+		]
+	in machine_eval prog 0 [] builtins []
 
 
 
@@ -312,12 +365,17 @@ let link ctx body =
 **	Fouine to stack machine - compiler
 *)
 
-(* compile [expr -> context -> machine_instr list] [private]
+(* compile [expr -> context -> char list -> machine_instr list] [private]
    Compiles an expression into machine code. Subfunctions are pused to the
    provided linker context; the function body is returned.
-   @expr  Expression to compile
-   @ctx   Linker context where the program is being compiled *)
-let rec compile expr ctx = match expr.tree with
+   @expr    Expression to compile
+   @ctx     Linker context where the program is being compiled
+   @transf  Transformations applied on the source code *)
+let rec compile expr ctx transf =
+	(* Shadow the definition of compile to get rid of the "transf" parameter *)
+	let compile e ctx = compile e ctx transf in
+
+	match expr.tree with
 
 	(* Literals and identifiers *)
 	| E_Int i 		-> [ M_Push (V_Int i) ]
@@ -331,10 +389,10 @@ let rec compile expr ctx = match expr.tree with
 
 	(* Pattern matching and try .. with .. *)
 	| E_Match (e, cl) ->
-		compile e ctx @ compile_cases cl ctx 0
+		compile e ctx @ compile_cases cl ctx 0 transf
 	| E_Try (e, cl) ->
 		let code_e	= compile e ctx in
-		let cases	= compile_cases cl ctx 1 in
+		let cases	= compile_cases cl ctx 1 transf in
 
 		let lcases	= List.length cases in
 		let lcode_e	= List.length code_e in
@@ -348,11 +406,7 @@ let rec compile expr ctx = match expr.tree with
 
 	(* Recursive let - create a recursive "close" instruction *)
 	| E_LetRec (n, e, f) ->
-		(* Edit the "close" instruction inside the code for e *)
-		let code_e = match compile e ctx with
-		| [M_Close (None, p, addr)] -> [M_Close (Some n, p, addr)]
-		| _ -> raise (InternalError "Trying to build a recursive value") in
-
+		let code_e = recursify (compile e ctx) n transf in
 		(* Then build the let binding as usual *)
 		code_e @ [M_Let (P_Name n)] @ compile f ctx @ [M_EndLet (P_Name n)]
 
@@ -401,14 +455,16 @@ let rec compile expr ctx = match expr.tree with
 	| E_Lower (e, f)		-> compile f ctx @ compile e ctx @ [M_Lt]
 	| E_LowerEqual (e, f)	-> compile f ctx @ compile e ctx @ [M_Le]
 
-(* compile_cases [(pattern * expr) list -> context -> int ->machine_instr list]
+(* compile_cases
+   [(pattern * expr) list -> context -> int -> char list -> machine_instr list]
    Generates a program that tries to match the provided cases in order.
    @cl         List of cases that are matched
    @ctx        Context where the match or try statement is being compiled
-   @jump_base  Number of failure-reporting instructions after the match *)
-and compile_cases cl ctx jump_base =
+   @jump_base  Number of failure-reporting instructions after the match
+   @transf     Transformations applied to source code *)
+and compile_cases cl ctx jump_base transf =
 		(* Get the raw code for each case *)
-		let codes = List.map (fun (p, e) -> (p, compile e ctx)) cl in
+		let codes = List.map (fun (p, e) -> (p, compile e ctx transf)) cl in
 
 		(* For each case: try to match. If the binding fails, try the next case
 		   by jumping over the code of the case. Otherwise, just execute the
@@ -431,9 +487,9 @@ and compile_cases cl ctx jump_base =
 
 		List.concat (List.map make_case cases)
 
-(* machine_compile [program -> machine_program]
+(* machine_compile [program -> char list -> machine_program]
    Compiles a Fouine program into an equivalent stack-machine program *)
-let machine_compile prog =
+let machine_compile prog transf =
 
 	(* Create a context for the whole program *)
 	let ctx = context_create () in
@@ -443,15 +499,13 @@ let machine_compile prog =
 	let compile_statement stmt = match stmt with
 		(* Evaluate the instruction and drop the result *)
 		| S_Expr (_, e) ->
-			compile e ctx @ [M_Let P_Wildcard]
+			compile e ctx transf @ [M_Let P_Wildcard]
 		(* Evaluate the expression and match the result *)
 		| S_LetVal (_, p, e) ->
-			compile e ctx @ [M_Let p]
+			compile e ctx transf @ [M_Let p]
 		(* Edit the close instruction inside the code for e *)
 		| S_LetRec (_, n, e) ->
-			let code_e = match compile e ctx with
-			| [M_Close (None, p, addr)] -> [M_Close (Some n, p, addr)]
-			| _ -> raise (InternalError "Trying to build a recursive value") in
+			let code_e = recursify (compile e ctx transf) n transf in
 			code_e @ [M_Let (P_Name n)]
 		(* Assembler does not care *that much* about types *)
 		| S_Type (_, _, _) -> [] in

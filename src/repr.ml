@@ -170,7 +170,7 @@ let rec repr_value value verbose = match value with
 
 (* repr_statement [statement -> string]
    Produces a syntax tree for a statement, very much like repr_expr *)
-let repr_statement stmt = match stmt with
+let rec repr_statement stmt = match stmt with
 	| S_Expr (_, e) ->
 		repr_expr e 0
 	| S_LetVal (r, p, e) ->
@@ -180,12 +180,42 @@ let repr_statement stmt = match stmt with
 		sprintf "(%s) let rec %s =\n%s"
 		(repr_range r) (n) (repr_expr e 2)
 	| S_Type (r, name, ctors) ->
-		let elements = String.concat "\n" (List.map (fun c ->
-			sprintf "(%s)   %s" (repr_range r) c
+		let elements = String.concat "\n" (List.map (fun (c, mtype) ->
+			sprintf "(%s)   %s of %s" (repr_range r) c (repr_mtype mtype)
 		) ctors) in
 		sprintf "(%s) type %s\n%s" (repr_range r) name elements
 
 (* repr_program [program -> string]
    Returns a printable version of a statement list *)
-let repr_program stmts =
+and repr_program stmts =
 	String.concat "" (List.map repr_statement stmts)
+
+(* repr_mtype [mtype -> string]
+   Yields a representation of the provided monotype *)
+and repr_mtype t = match t with
+	| T_Int		-> "int"
+	| T_Bool	-> "bool"
+	| T_Unit	-> "unit"
+	| T_ADT s	-> s
+	| T_Var v	->
+		if v < 26 then sprintf "%c" (Char.chr (v + 97))
+		else sprintf "type%d" v
+	| T_Fun (t1, t2)
+		-> sprintf "(%s -> %s)" (repr_mtype t1) (repr_mtype t2)
+	| T_Product (_, tl)
+		-> "(" ^ String.concat " * " (List.map repr_mtype tl) ^ ")"
+	| T_List t'
+		-> repr_mtype t' ^ " list"
+	| T_Ref t'
+		-> repr_mtype t' ^ " ref"
+
+(* repr_ptype [ptype -> string]
+   Yields a representation of the provided polytype *)
+and repr_ptype (gen, t) =
+	(if gen <> IntSet.empty then
+		let varname v acc =
+			if v < 26 then acc ^ sprintf " %c" (Char.chr (v + 97))
+			else acc ^ sprintf " type%d" v in
+		IntSet.fold varname gen "∀" ^ ". "
+	else "")
+	^ repr_mtype t

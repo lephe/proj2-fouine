@@ -250,3 +250,16 @@ envoyé).
   au milieu du reste, sans avoir à le contenir dans une instruction.
 
 * Implémenté le compilateur de Fouine vers le langage à pile.
+
+*[master 3c47bc6]*
+	SECD-like stack machine with interpreter, compiler, linker.
+
+---
+
+* Support partiel des transformations pour la machine : -E marche bien, -R est
+  pas encore gérable.
+
+* Fusionné le module *Typing* avec le reste de l'application et intégré
+  l'inférence de types à l'intégralité de l'application. Cette fonctionnalité
+  est désactivée par défaut en mode non-interactif parce que incomplète.
+

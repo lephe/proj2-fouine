@@ -104,7 +104,8 @@ let source_statement stmt = begin match stmt with
 	| S_LetRec (_, n, e) ->
 		sprintf "let rec %s = %s" n (source_expr e 0)
 	| S_Type (_, name, ctors) ->
-		sprintf "type %s = %s\n" name (String.concat " | " ctors)
+		let ct (c, mtype) = c ^ " of " ^ repr_mtype mtype in
+		sprintf "type %s = %s\n" name (String.concat " | " (List.map ct ctors))
 	end ^ ";;\n"
 
 (* source_program [program -> string]

@@ -10,6 +10,7 @@ open Pattern
 open Exceptions
 open Value
 open Range
+open Typing
 
 (*
 **	Built-in functions
@@ -94,12 +95,12 @@ let interpreter_start tr_list =
 	| _ -> raise (InternalError "interpreter_start: unknown transformation") in
 
 	let list_type = [
-		("Empty",	"list");
-		("Cons",	"list");
-		("E",		"exn");
+		("Empty",	("list", T_Unit));
+		("Cons",	("list", T_Product (2, [T_Int; T_ADT "list"])));
+		("E",		("exn",  T_Int));
 	] in
 
-	let builtins  = [
+	let builtins = [
 		("prInt", V_Builtin builtin_prInt);
 		("raise", V_Builtin builtin_raise);
 		("alloc", V_Builtin builtin_alloc);
@@ -107,21 +108,31 @@ let interpreter_start tr_list =
 		("write", V_Builtin builtin_write);
 	] in
 
+	let builtins_types = [
+		("prInt", (IntSet.empty,			T_Fun (T_Int, T_Int)));
+		("raise", (IntSet.of_list [-1; -2],	T_Fun (T_Var (-2), T_Var (-1))));
+	] in
+
 	let env = {
-		vars  = List.fold_left add StringMap.empty (builtins @ tr_specific);
-		types = List.fold_left add StringMap.empty list_type;
-		exchs = [];
+		vars	= List.fold_left add StringMap.empty (builtins @ tr_specific);
+		adts	= List.fold_left add StringMap.empty list_type;
+		exchs	= [];
+		types	= List.fold_left add StringMap.empty builtins_types;
 	}
 	in env
 
-(* interpreter_exec [statement -> env -> env * event list]
+(* interpreter_exec [bool -> statement -> env -> env * event list]
    Executes a statement and returns the updated environment along with a list
-   of events, for post-processing (such as showing in terminal) *)
-let interpreter_exec stmt env = match stmt with
+   of events, for post-processing (such as showing in terminal). The boolean
+   argument indicates whether type inference should be done *)
+let interpreter_exec infer stmt env = match stmt with
 
 	(* For raw expressions, just yield the result *)
 	| S_Expr (_, e) ->
-		(env, [Ev_Result (expr_eval e env)])
+		(* Infer type for the expression *)
+		let ptype = if infer then type_infer e env
+			else (IntSet.empty, T_Unit) in
+		(env, [Ev_Result (expr_eval e env, ptype)])
 
 	(* For let-value, return a (possibly empty) list of name bindings if the
 	   pattern is not "_", otherwise return a result *)
@@ -130,18 +141,50 @@ let interpreter_exec stmt env = match stmt with
 		   the range: add it on the fly *)
 		(* TODO: This would not be needed if patterns had a range *)
 		begin try
+			let ptype = if infer then type_infer e env
+				else (IntSet.empty, T_Unit) in
 			let value = expr_eval e env in
-			if pat = P_Wildcard then (env, [Ev_Result value]) else
 
-			(* Perform the bindings in order *)
-			let bindings = pattern_unify pat value in
-			let bind env (name, value) = {
-				env with vars = StringMap.add name value env.vars
+			(* If pattern is '_', use the Ev_Result event, as OCaml *)
+			if pat = P_Wildcard then (env, [Ev_Result (value, ptype)]) else
+
+			(* Break down the inferred type according to the pattern, to deduce
+			   the type of the bound variables *)
+			let type_bindings = if infer then type_breakdown ptype pat env
+				else [] in
+			(* Break down the value to bind variables *)
+			let val_bindings = pattern_unify pat value in
+
+			(* Merge the two lists to get the type associated with each name.
+			   To do this efficiently use maps, then go back tot lists *)
+
+			let merge map ptype_opt val_opt = match ptype_opt, val_opt with
+				| Some ptype, Some value -> Some (value, ptype)
+				| None, Some value -> Some (value, (IntSet.empty, T_Unit))
+				| _ -> raise (InternalError "interpreter_exec:merge: panic") in
+
+			let list2map l =
+				let add map (n, v) = StringMap.add n v map in
+				List.fold_left add StringMap.empty l in
+			let map2list m =
+				let add n (v, p) l = (n, v, p) :: l in
+				StringMap.fold add m [] in
+
+			let bindings_map = StringMap.merge merge (list2map type_bindings)
+				(list2map val_bindings) in
+			let bindings = List.rev (map2list bindings_map) in
+
+			(* Perform the bindings *)
+			let bind env (name, value, ptype) = {
+				vars	= StringMap.add name value env.vars;
+				adts	= env.adts;
+				exchs	= env.exchs;
+				types	= StringMap.add name ptype env.types;
 			} in
 			let env' = List.fold_left bind env bindings
 
 			(* Return the list of names *)
-			in (env', List.map (fun (n, v) -> Ev_Binding (n, v)) bindings)
+			in (env', List.map (fun (n,v,p) -> Ev_Binding (n,v,p)) bindings)
 		with
 		| MatchError (_, p, v)  -> raise (MatchError (r, p, v))
 		| MultiBind (b, _, set) -> raise (MultiBind (b, r, set))
@@ -150,11 +193,14 @@ let interpreter_exec stmt env = match stmt with
 	(* Let-rec only bind names, so return a single binding *)
 	| S_LetRec (r, n, e) ->
 		(* Build an equivalent expression and let expr_eval do the recursion *)
-		let name = { range = r; tree = E_Name n } in
-		let exp  = { range = r; tree = E_LetRec (n, e, name) } in
+		let name = r% E_Name n in
+		let exp  = r% E_LetRec (n, e, name) in
 		let value = expr_eval exp env in
+		(* Also infer the type of this useful expression *)
+		let ptype = if infer then type_infer exp env
+			else (IntSet.empty, T_Unit) in
 		({ env with vars = StringMap.add n value env.vars },
-		 [Ev_Binding (n, value)])
+		 [Ev_Binding (n, value, ptype)])
 
 	(* Type definitions have their own kind of event *)
 	(* TODO: Create the type-definition event (requires structure in types) *)
@@ -165,15 +211,15 @@ let interpreter_exec stmt env = match stmt with
 			then raise (TypeOverload (r, ctor)) in
 
 		(* Check that the type name is not already used *)
-		if List.exists (fun n ->
-			try StringMap.find n env.types = name
+		if List.exists (fun (n, t) ->
+			try fst (StringMap.find n env.adts) = name
 			with Not_found -> false)
 			ctors
 		then raise (MultiBind (true, r, StringSet.singleton name)) else
 
 		(* Extend the environment with the new constructors *)
-		let add types ctor =
+		let add types (ctor, mtype) =
 			check ctor types;
-			StringMap.add ctor name types in
-		let newtypes = List.fold_left add env.types ctors in
-		({ env with types = newtypes }, [])
+			StringMap.add ctor (name, mtype) types in
+		let newadts = List.fold_left add env.adts ctors in
+		({ env with adts = newadts }, [])

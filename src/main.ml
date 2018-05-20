@@ -25,6 +25,10 @@ let help_message =
 "  -stdin      Read from stdin (expect shorter error diagnoses)\n" ^
 "  (none)      Start the Read-Eval-Print Loop shell\n" ^
 "\n" ^
+"Experimental options:\n" ^
+"  -typing     Enable type inference (enabled by default in shell)\n" ^
+"  -no-typing  Disable type inference\n" ^
+"\n" ^
 "Debugging options:\n" ^
 "  -ast        After parsing, show an AST\n" ^
 "  -debug      After parsing, show regenerated sources (overrides -ast)\n" ^
@@ -45,6 +49,8 @@ let default_conf = {
 	file 		= "";
 	stdin		= false;
 	shell		= false;
+
+	typing		= None;
 
 	ast			= false;
 	debug		= false;
@@ -70,6 +76,9 @@ let config_parse argv =
 
 		| "--help"		-> { conf with help = true }
 		| "-stdin"		-> { conf with stdin = true }
+
+		| "-typing"		-> { conf with typing = Some true }
+		| "-no-typing"	-> { conf with typing = Some false }
 
 		| "-R"			-> { conf with transf = [ 'R' ] }
 		| "-E"			-> { conf with transf = [ 'E' ] }
@@ -146,13 +155,13 @@ let s_get_this_show_on_the_road =
 
 	(* If -machine or -stackcode is specified, enter the stack machine mode *)
 	if conf.machine || conf.stackcode then begin
-		let code = machine_compile program in
+		let code = machine_compile program conf.transf in
 		(* Print the source if -stackcode is specified *)
 		if conf.stackcode then print_string (source_machine code);
 		if conf.stackcode && conf.machine then print_newline ();
 		(* Execute the program if -machine is specified *)
 		let result = if conf.machine
-		then errors_try (fun () -> machine_exec code)
+		then errors_try (fun () -> machine_exec code conf.transf)
 		else Some () in
 		(* Leave now since we don't interpret the Fouine program as is *)
 		exit (if result = None then 1 else 0)
@@ -165,10 +174,12 @@ let s_get_this_show_on_the_road =
 	(* Stop now if -parse is on, we don't need to evaluate *)
 	if conf.parse then exit 0;
 
+	(* In execution mode, disable typing by default *)
+	let typing = match conf.typing with Some b -> b | None -> false in
 	(* Create a fresh execution environment *)
 	let env = interpreter_start conf.transf in
 	(* This function evaluates a single statement *)
-	let eval_one env stmt = fst (interpreter_exec stmt env) in
+	let eval_one env stmt = fst (interpreter_exec typing stmt env) in
 
 	(* Exceptions are caught here! *)
 	let final_env = errors_try (fun () -> List.fold_left eval_one env program)

@@ -21,6 +21,7 @@ b="\e[34;1m"
 p="\e[35;1m"
 w="\e[0m"
 W="\e[0m\e[1m"
+x="\e[34m"
 
 prelude="tests/prelude.ml"
 
@@ -34,6 +35,35 @@ replicate=
 transf=
 # Whether to test the stack machine
 machine=
+
+# Parse command-line options
+#   -replicate triggers testing fouine's -debug output through ocaml
+#   -R, -E, -ER and -RE trigger testing the transformations
+#   Other options go directly to fouine for debug
+for arg; do case "$arg" in
+	"-replicate")	replicate=true;;
+	"-R")		transf="$transf -R";;
+	"-E")		transf="$transf -E";;
+	"-ER")		transf="$transf -ER";;
+	"-RE")		transf="$transf -RE";;
+	"-machine")	machine=true;;
+	*)		fopt="$fopt $arg";;
+esac; done
+
+echo -e ""
+echo -e "$x=-=-=$W Automated tests $w$x=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=$w"
+echo -e ""
+echo -e "  ${y}PARSING${w}    - Fouine should parse iff OCaml does"
+echo -e "  ${b}OCAML${w}      - Compare Fouine output with that of OCaml"
+echo -e "  ${p}ZERO${w}       - Fouine should succeed and print 0"
+echo -e "  ${r}EXCEPTIONS${w} - Fouine should catch an exception and fail"
+echo -e "  ${W}REPLICATE${w}  - Compare Fouine and Fouine -debug | OCaml"
+echo -e "  ${W}TRANSF ...${w} - Compare original and transformed programs"
+echo -e ""
+echo -e "Additional Fouine options:${W}$fopt${w}"
+echo -e ""
+echo -e "$x=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=$w"
+echo -e ""
 
 function show_output()
 {
@@ -61,7 +91,7 @@ function compare()
 	out_ocaml=$(cat "$prelude" "$2" | ocaml -stdin)
 	ret_ocaml="$?"
 
-	out_fouine=$(./fouine "$fopt" "$1")
+	out_fouine=$(./fouine $fopt "$1")
 	ret_fouine="$?"
 
 	if [[ $out_ocaml == $out_fouine && $ret_ocaml == 0
@@ -87,7 +117,7 @@ function parse()
 	ret_ocaml="$?"
 	[[ $ret_ocaml != 0 ]] && ret_ocaml=1
 
-	./fouine -parse "$fopt" "$1" 1> /dev/null 2>&1
+	./fouine -parse $fopt "$1" 1> /dev/null 2>&1
 	# Same here, only the return status matters
 	ret_fouine="$?"
 	[[ $ret_fouine != 0 ]] && ret_fouine=1
@@ -108,7 +138,7 @@ function parse()
 # Check that output is zero (when code cannot be executed by OCaml
 function zero()
 {
-	out=$(./fouine "$fopt" "$1")
+	out=$(./fouine $fopt "$1")
 	ret="$?"
 
 	if [[ $ret != 0 ]]; then
@@ -133,7 +163,7 @@ function zero()
 function except()
 {
 	# Check that the file parses, but fails *at runtime*
-	./fouine -parse "$fopt" "$1" >/dev/null 2>&1
+	./fouine -parse $fopt "$1" >/dev/null 2>&1
 	ret="$?"
 
 	if [[ $ret != 0 ]]; then
@@ -143,7 +173,7 @@ function except()
 		return 1
 	fi
 
-	stderr=$( (./fouine "$fopt" "$1" 3>&2 2>&1 1>&3-) 2> /dev/null )
+	stderr=$( (./fouine $fopt "$1" 3>&2 2>&1 1>&3-) 2> /dev/null )
 	ret="$?"
 
 	# Check that the return status is nonzero AND stderr is not empty
@@ -164,7 +194,7 @@ function except()
 # Check that Fouine and OCaml on Fouine's debug return the same thing
 function replicate()
 {
-	./fouine -parse "$fopt" "$1" -debug 2> /dev/null > /tmp/fouine.ml
+	./fouine -parse $fopt "$1" -debug 2> /dev/null > /tmp/fouine.ml
 
 	if [[ $? != 0 ]]; then
 		echo -e "${r}●${w} $1"
@@ -178,10 +208,10 @@ function replicate()
 # Test transformations
 function transform()
 {
-	out_transf=$(./fouine "$fopt" "$1" "$2")
+	out_transf=$(./fouine $fopt $1 "$2")
 	ret_transf="$?"
 
-	out_fouine=$(./fouine "$fopt" "$2")
+	out_fouine=$(./fouine $fopt "$2")
 	ret_fouine="$?"
 
 	if [[ $out_transf == $out_fouine && $ret_transf == 0
@@ -198,33 +228,6 @@ function transform()
 
 	return 1
 }
-
-# Parse command-line options
-#   -replicate triggers testing fouine's -debug output through ocaml
-#   -R, -E, -ER and -RE trigger testing the transformations
-#   Other options go directly to fouine for debug
-for arg; do case "$arg" in
-	"-replicate")	replicate=true;;
-	"-R")		transf="$transf -R";;
-	"-E")		transf="$transf -E";;
-	"-ER")		transf="$transf -ER";;
-	"-RE")		transf="$transf -RE";;
-	"-machine")	machine=true;;
-	*)		fopt="$fopt $arg";;
-esac; done
-
-echo -e "${W}"
-echo -e "Automated test types:"
-echo -e "  ${y}PARSING${W}    - Fouine should parse iff OCaml does"
-echo -e "  ${b}OCAML${W}      - Compare Fouine output with that of OCaml"
-echo -e "  ${p}ZERO${W}       - Fouine should succeed and print 0"
-echo -e "  ${r}EXCEPTIONS${W} - Fouine should catch an exception and fail"
-echo -e "  ${W}REPLICATE${W}  - Compare Fouine and Fouine -debug | OCaml"
-echo -e "  ${W}TRANSF ...${W} - Compare original and transformed programs"
-echo -e ""
-echo -e "Unit tests are divided into folders; each folder focuses on a"
-echo -e "specific language feature."
-echo -e "${w}"
 
 # Parsing tests
 for folder in $tests_parsing; do

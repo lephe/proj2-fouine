@@ -4,3 +4,6 @@ fouine
 
 # Sublime Text files
 *.sublime-*
+
+# Report
+report/***

@@ -40,7 +40,8 @@ Lexer # An ocamllex-generated lexer
 
 Machine # A stack-based machine as a compilation target
 
-	...
+	machine_exec()				# Run a machine program in a fresh machine
+	machine_compile()			# Compile Fouine to SECD/assembly
 
 Main # Command-line parsing and main flow for non-interactive invocations
 
@@ -115,7 +116,7 @@ Types # Type definitions and functor-generated modules
 
 Typing # Type inference
 
-	(not merged with application yet)
+	type_infer()				# Infer type of expression in environment
 
 Value # Concrete data types
 

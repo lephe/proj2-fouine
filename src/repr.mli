@@ -38,3 +38,11 @@ val repr_statement : statement -> string
 (* repr_program
    Returns a printable version of a statement list *)
 val repr_program : program -> string
+
+(* repr_mtype
+   Yields a representation of the provided monotype *)
+val repr_mtype : mtype -> string
+
+(* repr_ptype
+   Yields a representation of the provided polytype *)
+val repr_ptype : ptype -> string

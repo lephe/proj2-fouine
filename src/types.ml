@@ -34,6 +34,8 @@ type config = {
 	stdin:		bool;		(* Read from stdin (has precedence over <file> *)
 	shell:		bool;		(* Use the interactive REPL shell (fallback) *)
 
+	typing:		bool option;(* Whether type inference is enabled *)
+
 	ast:		bool;		(* Display the AST before executing *)
 	debug:		bool;		(* Show program source, akin to -ast *)
 	parse:		bool;		(* Stop after parsing (for parsing-only tests) *)
@@ -68,6 +70,7 @@ type mtype =
 	| T_Fun			of mtype * mtype
 	| T_Product		of int * mtype list
 	| T_List		of mtype
+	| T_Ref			of mtype
 	(* Named ADTs *)
 	| T_ADT			of string
 
@@ -174,7 +177,7 @@ type statement =
 	| S_Expr	of range * expr
 	| S_LetVal	of range * pattern * expr
 	| S_LetRec	of range * string * expr
-	| S_Type	of range * string * string list
+	| S_Type	of range * string * (string * mtype) list
 
 (* program
    Just put up statements together and you get a full program *)
@@ -207,7 +210,7 @@ type value =
 	| V_MachineClosure of pattern * machine_env * int
 	(* Machine stack frame *)
 	| V_MachineFrame of machine_env * int
-	(* Machine builtings *)
+	(* Machine builtins *)
 	| V_MachineBuiltin of (machine_program -> int -> machine_stack ->
 		machine_env -> machine_state list -> value -> unit)
 
@@ -219,18 +222,22 @@ type value =
 and exch = env * StringSet.t * (value -> value) * (pattern * expr) list
 
 (* env
-   A set of name -> value mappings, as well as a set of name -> type mappings
-   for Algebraic Data Types. *)
+   Execution environment. Provides information on:
+   - Visible variables (name -> value)
+   - Defined Algebraic Data Types (constructor -> adt_name * type)
+   - Active exception handlers
+   - Type of toplevel variables, used only by Interpreter (name -> ptype) *)
 and env = {
-	vars:  value StringMap.t;
-	types: string StringMap.t;
-	exchs: exch list;
+	vars:	value StringMap.t;
+	adts:	(string * mtype) StringMap.t;
+	exchs:	exch list;
+	types:	ptype StringMap.t;
 }
 
 (* memory
    A storage for references. I hoped to make "memory" a type of OCaml-shared
-   mutable values. Sharing is not a problem (ADTs like "value" are OK) but the
-   mutable requirement only leaves records:
+   mutable values. Sharing is not a problem (ADTs like "value" are shared) but
+   the  mutable requirement only leaves records:
      type memory_element = { mutable data: value; }
    Since this is a reference, and references are not allowed, I'll be using a
    brutal hash table instead. Not an array because of size extensions, but
@@ -251,10 +258,9 @@ and memory_addr = int
    Noticeable events that happen during program execution. These are emitted by
    the Interpreter module and typically reported by the interactive shell *)
 (* TODO: Add type definitions events! *)
-(* TODO: Add "exit function was called" event *)
 and event =
-	| Ev_Result of value
-	| Ev_Binding of string * value
+	| Ev_Result of value * ptype
+	| Ev_Binding of string * value * ptype
 
 
 

@@ -1,5 +1,5 @@
 (* Simple list functions using an ADT *)
-type mylist = MyEmpty | MyCons
+type mylist = MyEmpty of unit | MyCons of int * mylist
 
 let rec list_length l = match l with
 | MyEmpty _ -> 0

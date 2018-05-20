@@ -111,7 +111,10 @@ let make_list_one r e : ast =
 %token IF THEN ELSE
 %token FUN
 %token REF
-%token TYPE TRY MATCH WITH
+%token TYPE OF TRY MATCH WITH
+
+/* Tokens associated with type names */
+%token TYPE_INT TYPE_BOOL TYPE_UNIT
 
 /* Special end-of-file token for end-of-stream conflicts */
 %token EOF
@@ -150,6 +153,14 @@ let make_list_one r e : ast =
 %left EQ NE GT GE LT LE
 
 %right CONS
+
+/* Arrow for types (no impact on functions) */
+%left ARROW
+/* Ref for types */
+%nonassoc REF
+/* Product types overload the meaning of '*' */
+%nonassoc below_TPRODUCT
+%left prec_TPRODUCT
 
 /* Usual arithmetic operations, and unknown (user-defined) operators */
 %left PLUS MINUS OPERATOR
@@ -214,8 +225,12 @@ toplevel_statement:
 		else S_LetRec (POS, n, make_fun POS args e)
 	  }
 	/* OCaml-style type definitions (but not compatible with typing) */
-	| TYPE n = NAME EQ option(PIPE) hd = CTOR l = list(PIPE c = CTOR { c })
+	| TYPE n = NAME EQ option(PIPE) hd = adt l = list(PIPE c = adt { c })
 		{ S_Type (POS, n, hd :: l) }
+
+/* Constructor declaration in an ADT */
+adt:
+	| c = CTOR OF t = typespec { (c, t) }
 
 /* The input of the REPL shell */
 repl:
@@ -402,3 +417,24 @@ pattern_comma_list:
 	| p = pattern COMMA q = pattern		{ [q; p] }
 	| pcl = pattern_comma_list COMMA r = pattern
 										{ r :: pcl }
+
+/*
+**	Type descriptions
+*/
+
+typespec:
+	| TYPE_INT							{ T_Int }
+	| TYPE_BOOL							{ T_Bool }
+	| TYPE_UNIT							{ T_Unit }
+	| LPAR t = typespec RPAR			{ t }
+	| t = typespec REF					{ T_Ref t }
+	| n = NAME							{ T_ADT n }
+	| t = typespec ARROW u = typespec	{ T_Fun (t, u) }
+	| tl = typespec_product %prec below_TPRODUCT
+		{ T_Product (List.length tl, List.rev tl) }
+
+typespec_product:
+	| t = typespec TIMES u = typespec %prec prec_TPRODUCT
+										{ [u; t] }
+	| tl = typespec_product TIMES u = typespec %prec prec_TPRODUCT
+										{ u :: tl }

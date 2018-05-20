@@ -72,9 +72,6 @@ let rec expr_free exp =
    They return the constructor argument on success and throw a type error in
    all other cases *)
 
-(* TODO: Do something about the expect_* functions. Typing will make sure that
-   TODO: the type is correct, but OCaml will not know... *)
-
 open Repr
 open Source
 
@@ -141,7 +138,7 @@ and expr_eval_k exp env recs k : value =
 
 	(* Type constructors : first check that the constructor exists *)
 	| E_Ctor (ctor, e) ->
-		if not (StringMap.exists (fun key v -> key = ctor) env.types)
+		if not (StringMap.exists (fun key v -> key = ctor) env.adts)
 		then raise (NameError (exp.range, ctor))
 		else eval e env recs (fun v -> k (V_Ctor (ctor, v)))
 

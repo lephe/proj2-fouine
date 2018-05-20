@@ -14,5 +14,6 @@ val interpreter_start : char list -> env
 
 (* interpreter_exec
    Executes a statement and returns the updated environment along with a list
-   of events, for post-processing (such as showing in terminal) *)
-val interpreter_exec : statement -> env -> env * event list
+   of events, for post-processing (such as showing in terminal). The boolean
+   argument indicates whether type inference should be done *)
+val interpreter_exec : bool -> statement -> env -> env * event list

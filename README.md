@@ -1,8 +1,23 @@
 # Projet 2 : Fouine (Sébastien Michelland)
 
+Pour ce rendu 4, je propose une machine SECD/assembly et une inférence de type
+polymorphe. Ça m'a pris un moment donc le rendu est un peu rugueux : pas mal de
+choses par-ci par-là auraient pu être améliorées avec un peu plus de temps.
+
+En particulier l'inférence de type n'est pas assez avancée pour être mise en
+production : il faudrait plus de travail pour parvenir à quelque chose de
+fonctionnel, puis robuste. Voyez plus bas.
+
 Je n'ai pas implémenté d'option de l'exécutable pour comparer le résultat
 renvoyé par la machine à pile au résultat interprété ; le script de test le
 fait déjà de façon automatique.
+
+Je tiens à préciser tout de suite que j'autorise la machine à exploser si
+exécuter le code Fouine d'origine résulte en une exception au toplevel.
+
+Pour l'inférence de types, j'ai suivi une présentation d'Algorithme W à base
+d'Union-Find qui vient de l'article Wikipédia anglais pour éviter le formalisme
+à base de substitutions de Damas et Milner. C'est plus confortable.
 
 ## Organisation des fichiers
 
@@ -53,8 +68,6 @@ sert pour tester avec OCaml.
 
 ## Corrections depuis le rendu 3
 
-
-
 * `let rec f = fun x -> if x=0 then 1 else f 0 in prInt (f 5)` refusé
    Mon parser prenait ça pour un let-valeur et le classifiait abusivement en
    non-récursif. J'ai relégué le refus du let-valeur récursif à l'évaluateur
@@ -77,7 +90,7 @@ sert pour tester avec OCaml.
   Un autre oubli: j'avais laissé [(expr)] dans le parser au lieu d'autoriser
   [(seq_expr)], donc il rejetait (r := r + 1; raise (E 0)).
 
-## Langage adopté pour la machine SECD
+## Langage choisi pour la machine SECD
 
 J'ai adopté un langage type assembleur, par envie de faire de l'impératif je
 crois. Pour se rapprocher du réalisme, j'ai évité de placer du code dans les
@@ -105,9 +118,9 @@ description (rapide) de son effet.
     est levée. Sinon, empile sur l'environnement autant de bindings qu'il y a
     de variables libres dans le pattern.
   match "pattern"
-    En cas de succès, se comporte comme "let" et empile false sur la pile. En
-    cas d'échec, aucun binding n'est fait, la valeur filtrée est renvoyée sur
-    la pile, et true est empilé.
+    En cas de succès, se comporte comme "let" puis empile false sur la pile. En
+    cas d'échec, aucun binding n'est fait, la valeur filtrée est remise sur la
+    pile, puis true est empilé.
   endlet "pattern"
     Dépile autant d'éléments de l'environnement qu'il y a de variables libres
     dans le pattern.
@@ -119,11 +132,11 @@ description (rapide) de son effet.
     <addr> sur la pile.
     NB. En pratique <addr> est stocké relativement à la valeur de PC.
   close ("name") "pattern" <addr>
-    Comme close, mais la clôture est rendue récursive sous le nom "name".
+    Comme "close", mais la clôture est rendue récursive sous le nom "name".
     NB. En pratique <addr> est stocké relativement à la valeur de PC.
   apply
     Dépile une fonction et un argument, binde l'argument et appelle la
-    fonction. Il peut s'agir d'un built-in.
+    fonction. La fonction peut être soit une clôture, soit un built-in.
 
   jump <addr>
     Saute à l'adresse <addr>.
@@ -170,7 +183,7 @@ problèmes de terminaison pour les fonctions récursives.
 
 J'ai implémenté les exceptions à la sauce impérative avec du setjmp et du
 longjmp. J'ai sauvegardé les états sur une pile indépendante mais si j'avais
-disposé d'un nom réservé (genre "JMPBUF") j'aurais également pu les mettre sur
+disposé d'un nom réservé (genre "JMP_BUF") j'aurais également pu les mettre sur
 l'environnement.
 
 Les long jumps étant déjà très puissants, je n'ai plus eu besoin d'utiliser un
@@ -189,7 +202,44 @@ des adresses (temporaires dans un premier temps) quitte à éditer les
 instructions de clôture après coup.
 
 Le seul résultat vraiment "utile" est que le code généré est position-
-independent. L'affichage de -stackcode affiche les adresses absolutes pour la
+independent. L'affichage de -stackcode affiche les adresses absolues pour la
 lisibilité, mais tout est en relatif.
 
 Le fichier `src/machine.ml` contient une description complète du système.
+
+## Inférence de types incomplète
+
+Je cite, en vrac, les différentes choses qui font que le système n'est pas
+assez mûr. J'ai traité le polymorphisme au rendu 3 pour le dégager du rendu 4,
+mais malheureusement les plannings étaient trop serrés quand même.
+
+- Des bugs sur les tests (essayez `make test-typing`)
+- L'inférence pour la récurrence n'est pas assez rodée (faite rapidement)
+- Les ADTs sont trop pauvres (entre autres il n'y a pas d'ADTs paramétrés)
+- Les listes built-in ne marchent donc que pour les entiers
+- `raise` peut jeter n'importe quoi, pas forcément des `exn`
+- ...
+
+Par conséquent, l'inférence de type est activée par défaut en interactif, mais
+désactivée par défaut le reste du temps. Utilisez `-typing` et `-no-typing`
+pour contrôler ce paramètre.
+
+## Cas intéressants de typage
+
+Il y a quand même des trucs intéressants à sortir du polymorphisme. J'ai réussi
+à comprendre en profondeur la généralisation des variables de type et à trouver
+(expérimentalement) des règles pour décider quand généraliser. J'arrive à des
+choses assez réalistes :
+
+  [1]: let first x y = x;;
+  val first : ∀ a b. (a -> (b -> a)) = <closure>
+  [2]: let g = first 1;;
+  val g : (d -> int) = <closure>
+  [3]: g true;;
+  - : int = 1
+  [4]: g;;
+  - : (bool -> int) = <closure>
+  [5]: fun y -> first 1 y;;
+  - : ∀ i. (i -> int) = <closure>
+
+Bon, c'est classique, mais c'est satisfaisant.

@@ -17,6 +17,8 @@ test-all: all-native
 	@ ./test.sh -replicate -E -R -RE -ER -machine
 test-machine: all-native
 	@ ./test.sh -machine
+test-typing: all-native
+	@ ./test.sh -typing
 test: all-native
 	@ ./test.sh
 

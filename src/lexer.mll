@@ -63,12 +63,18 @@ rule main = parse
 	| "in"		{ IN }
 	| "let"		{ LET }
 	| "match"	{ MATCH }
+	| "of"		{ OF }
 	| "rec"		{ REC }
 	| "ref"		{ REF }
 	| "then"	{ THEN }
 	| "try"		{ TRY }
 	| "type"	{ TYPE }
 	| "with"	{ WITH }
+
+	(* Type names *)
+	| "int"		{ TYPE_INT }
+	| "bool"	{ TYPE_BOOL }
+	| "unit"	{ TYPE_UNIT }
 
 	(* Literals - literal unit is "LPAR RPAR" and is built by the parser *)
 	| ['0' - '9']+ as s { INT (int_of_string s) }

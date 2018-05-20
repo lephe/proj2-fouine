@@ -1,5 +1,5 @@
 (* Non-exhaustive pattern matching *)
-type tx = Tx | Ty;;
+type tx = Tx of int | Ty of int;;
 
-match Tx () with
+match Tx 2 with
 | Ty _ -> prInt 4
