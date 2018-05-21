@@ -21,6 +21,13 @@ exception WUnify of mtype * mtype		(* Cannot unify some types *)
    their type variables in the union-find structure. *)
 type typeenv = typevar StringMap.t
 
+let stringmap_union f m1 m2 =
+	let f' k x y = match x, y with
+	| (None, None) -> None
+	| (Some v, None) | (None, Some v) -> Some v
+	| (Some v1, Some v2) -> f k v1 v2
+	in StringMap.merge f' m1 m2
+
 (*
 **	An Union-Find structure to map classes of type variables to monotypes
 **	TODO: Add link-by-rank on top of path compression
@@ -262,7 +269,7 @@ and w env exp = match exp.tree with
 		(* Extend the typing environment and infer the type of the body *)
 		let args_poly = StringMap.map (fun t -> (IntSet.empty, t)) args in
 		let env' = { env with types =
-			StringMap.union (fun m x y -> Some y) env.types args_poly } in
+			stringmap_union (fun m x y -> Some y) env.types args_poly } in
 		let rettype = w env' f in
 		(* Build up the type associated with the pattern *)
 		let argtype = type_buildup p args env in
